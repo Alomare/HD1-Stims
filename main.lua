@@ -31,7 +31,7 @@ stim.start({
 	volume = obsidian.module("src/sound").gain(obsidian.settings.get("volume")),
 	sounds = obsidian.module("src/sounds"),
 })
-hud.start(stim.count_of, obsidian.log)
+hud.start(stim.count_of, obsidian.log, stim.edge_now)
 
 -- Other mods can read the stims of a Helldiver this machine plays or shows.
 function export.count(unit)

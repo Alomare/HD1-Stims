@@ -1,8 +1,8 @@
 # Stims
 
-Stim injectors for HELLDIVERS. Each Helldiver carries up to four stims and starts every drop and respawn with three. An ammo box gives two more, and can be picked up for stims alone when every weapon is full.
+Stim injectors for HELLDIVERS. Each Helldiver carries up to four stims and starts every drop and respawn with four. An ammo box gives two more, and can be picked up for stims alone when every weapon is full.
 
-A stim takes the key (V by default): the Helldiver raises the left fist and injects at the neck. Unless a dive, a knockdown, a reload, a throw or a melee cuts the motion short, the stim gives four seconds of endless stamina and 80 health a second, up to full health.
+A stim takes the key (V by default): the Helldiver raises the left fist and injects at the neck. Unless a dive, a knockdown, a reload, a throw or a melee cuts the motion short, the stim gives four seconds of endless stamina and 80 health a second, up to full health. The Helldiver moves at aiming speed while the injection plays, the screen edges glow light blue while the stim lasts, and another stim can start three seconds after the last one took effect.
 
 The loadout card shows a syringe right of the weapon, one cell per stim carried. Other players see the motion and the count of each Helldiver.
 

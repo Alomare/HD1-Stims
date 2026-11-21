@@ -4,12 +4,11 @@ local sync = obsidian.module("src/sync")
 local T = {}
 local function test(name, fn) T[#T + 1] = { name, fn } end
 
-test("a drop starts with three, takes one at a time down to none", function()
+test("a drop starts full with four, takes one at a time down to none", function()
 	local s = stock.new()
-	eq(s.count, 3)
-	eq(stock.take(s), true)
-	eq(stock.take(s), true)
-	eq(stock.take(s), true)
+	eq(s.count, 4)
+	eq(stock.full(s), true)
+	for _ = 1, 4 do eq(stock.take(s), true) end
 	eq(s.count, 0)
 	eq(stock.take(s), false, "none left")
 	eq(s.count, 0)
@@ -17,10 +16,10 @@ end)
 
 test("an ammo box adds two, never past four", function()
 	local s = stock.new()
+	eq(stock.add(s), 0, "full")
+	s.count = 3
 	eq(stock.add(s), 1, "3 + 2 capped at 4")
 	eq(s.count, 4)
-	eq(stock.full(s), true)
-	eq(stock.add(s), 0)
 	s.count = 1
 	eq(stock.add(s), 2)
 	eq(s.count, 3)

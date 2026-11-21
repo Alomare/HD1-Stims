@@ -2,7 +2,7 @@
 -- each ammo box. Pure, for tests.
 local M = {}
 
-M.START = 3
+M.START = 4
 M.MAX = 4
 M.REFILL = 2
 

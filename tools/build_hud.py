@@ -9,7 +9,9 @@ turned upright with the needle at the top. The barrel is cut into SEGMENTS cells
 per stim, and the rows of each cell are written to res/hud_layout.lua for src/hud.lua, which draws each
 cell as its own band of the texture.
 
-Writes res/hud_syringe.texture, res/hud.material, src/hud_layout.lua and internal/hud_preview.png.
+The boost edge (stims_edge) is the edges of the screen, white, stretched over the window.
+
+Writes res/hud_syringe.texture, res/hud_edge.texture, res/hud.material, src/hud_layout.lua and internal/hud_preview.png.
 Needs Pillow and numpy.
 
 The material is a list of records as the game's own gui materials have them: the top 32 bits of
@@ -27,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RES = ROOT / "res"
 BASE = "stims/hud"
 SPRITE = "stims_syringe"
+EDGE = "stims_edge"
 MATERIAL_VERSION = 10
 TEMPLATE, DIFFUSE_MAP, VARIABLE = 0xba25de35, 0x3aa8b87e, 0x46f80ade
 ICON = ROOT.parent.parent / "_assets" / "perk_icons" / "perk_adrenaline_01.png"
@@ -144,11 +147,46 @@ def barrel_rows(alpha):
     return max(runs, key=lambda r: r[1] - r[0]), widths
 
 
-def material():
-    name = murmur64(SPRITE.encode()) >> 32
-    tex = murmur64(f"{BASE}/{SPRITE}".encode())
-    record = struct.pack("<13I", name, TEMPLATE, 0, 0, 1, DIFFUSE_MAP, tex & 0xFFFFFFFF, tex >> 32, 1, VARIABLE, 0, 0, 0)
-    return struct.pack("<II", MATERIAL_VERSION, 1) + record
+def noise(shape, cells, seed):
+    """Smooth value noise, cells across the width."""
+    rng = np.random.default_rng(seed)
+    h, w = shape
+    gw, gh = cells + 2, max(2, round(cells * h / w)) + 2
+    grid = rng.random((gh, gw))
+    y, x = np.mgrid[0:h, 0:w]
+    fx, fy = x / w * (gw - 2), y / h * (gh - 2)
+    ix, iy = fx.astype(int), fy.astype(int)
+    tx, ty = fx - ix, fy - iy
+    tx, ty = tx * tx * (3 - 2 * tx), ty * ty * (3 - 2 * ty)
+    a = grid[iy, ix] * (1 - tx) + grid[iy, ix + 1] * tx
+    b = grid[iy + 1, ix] * (1 - tx) + grid[iy + 1, ix + 1] * tx
+    return a * (1 - ty) + b * ty
+
+
+def edge(w=512, h=288):
+    """The edges of the screen for the boost, strongest at the border and the corners, with a soft uneven
+    inner edge (the look of Eyes of Liberty's hurt edge, smoother and thinner)."""
+    y, x = np.mgrid[0:h, 0:w] + 0.5
+    u, v = x / w, y / h
+    d = np.minimum(np.minimum(u, 1 - u) * (w / h), np.minimum(v, 1 - v))
+    cu, cv = np.abs(u - 0.5) * 2, np.abs(v - 0.5) * 2
+    reach = 0.13 + 0.09 * (cu * cv) ** 2
+    rough = 0.6 * noise((h, w), 7, 21) + 0.4 * noise((h, w), 17, 33)
+    reach = reach * (0.75 + 0.5 * rough)
+    a = np.clip(1 - d / reach, 0, 1) ** 2.2
+    a = np.maximum(a, np.clip(1 - d / 0.01, 0, 1) * 0.8)
+    rgba = np.dstack([np.full((h, w, 3), 255, np.uint8), (a * 255 + 0.5).astype(np.uint8)])
+    return Image.fromarray(rgba, "RGBA")
+
+
+def material(sprites):
+    records = []
+    for sprite in sprites:
+        name = murmur64(sprite.encode()) >> 32
+        tex = murmur64(f"{BASE}/{sprite}".encode())
+        records.append((name, struct.pack("<13I", name, TEMPLATE, 0, 0, 1, DIFFUSE_MAP, tex & 0xFFFFFFFF, tex >> 32, 1, VARIABLE, 0, 0, 0)))
+    records.sort()
+    return struct.pack("<II", MATERIAL_VERSION, len(records)) + b"".join(r for _, r in records)
 
 
 def main():
@@ -169,7 +207,8 @@ def main():
     image = Image.fromarray(rgba, "RGBA")
     RES.mkdir(exist_ok=True)
     (RES / "hud_syringe.texture").write_bytes(dds_rgba(image))
-    (RES / "hud.material").write_bytes(material())
+    (RES / "hud_edge.texture").write_bytes(dds_rgba(edge()))
+    (RES / "hud.material").write_bytes(material([SPRITE, EDGE]))
     # Bands in texture rows from the top, as shares of the height: the cells bottom first (stim 1 is the
     # lowest cell), and the parts above and below the barrel.
     v = lambda row: round(row / h, 5)

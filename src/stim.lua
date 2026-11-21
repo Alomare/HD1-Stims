@@ -20,6 +20,28 @@ local function g(name) return rawget(_G, name) end
 
 M.BOOST = 4
 M.HEAL = 80
+M.REFRESH = 3      -- seconds after a stim takes effect before another can start
+-- While the motion plays the Helldiver moves as when aiming: the aim speed over the jog speed of the
+-- Helldiver's character_info (1.5 / 4), through the mover's velocity_scale (as Obsidian API's speed).
+M.SLOW = 0.375
+
+-- How strong the screen edge is, `t` seconds after a stim took effect: up at once, a third weaker by the
+-- end of the boost, then gone over EDGE_FADE. 0 when no stim (nil). Pure, for tests.
+M.EDGE_RISE = 0.08
+M.EDGE_FADE = 0.8
+function M.edge_strength(t)
+	if not t or t < 0 then return 0 end
+	if t < M.EDGE_RISE then return t / M.EDGE_RISE end
+	if t < M.BOOST then return 1 - 0.35 * (t / M.BOOST) end
+	local k = 1 - (t - M.BOOST) / M.EDGE_FADE
+	if k <= 0 then return 0 end
+	return 0.65 * k * k * (3 - 2 * k)
+end
+
+-- Whether a stim can start `since` seconds after the last one took effect (nil: none yet).
+function M.refreshed(since)
+	return since == nil or since >= M.REFRESH
+end
 -- States a stim can start in, and states the motion goes on through.
 M.START = { CharacterStateIdle = true, CharacterStateWalk = true, CharacterStateSprint = true,
 	CharacterStateAim = true, CharacterStateAimWalk = true }
@@ -44,6 +66,8 @@ local S = {
 	pending = {},      -- unit -> record, own stims before the stab
 	boosts = {},       -- unit -> seconds left
 	stamina_on = {},   -- unit -> true while the boost holds the stamina
+	since = {},        -- unit -> seconds since the last own stim took effect
+	slowed = {},       -- unit -> true while the motion slows it
 	remote = {},       -- unit -> stims, from other machines
 	seen = {},         -- "<peer>:<id>" -> used, the last count of stims seen
 	sent = nil,
@@ -100,14 +124,30 @@ local function share(st)
 	end
 end
 
+-- The mover's speed factor back to what Obsidian API's speed effect wants, or the game's.
+local function unslow(unit)
+	S.slowed[unit] = nil
+	if not g("Unit").alive(unit) then return end
+	local mover = api.game.master(unit, "mover")
+	if mover then mover.velocity_scale = api.effects.get("speed") or nil end
+end
+
+local function slow(unit)
+	local mover = api.game.master(unit, "mover")
+	if not mover then return end
+	mover.velocity_scale = (api.effects.get("speed") or 1) * M.SLOW
+	S.slowed[unit] = true
+end
+
 local function reset()
 	for unit in pairs(S.stamina_on) do
 		if g("Unit").alive(unit) and not api.effects.is_on("infinite_stamina") then
 			pcall(api.game.command, unit, "character", "infinite_stamina", false)
 		end
 	end
+	for unit in pairs(S.slowed) do pcall(unslow, unit) end
 	-- Emptied in place: src/anim.lua holds S.motions.
-	for _, t in ipairs({ S.own, S.motions, S.pending, S.boosts, S.stamina_on, S.remote, S.seen }) do
+	for _, t in ipairs({ S.own, S.motions, S.pending, S.boosts, S.stamina_on, S.remote, S.seen, S.since, S.slowed }) do
 		for k in pairs(t) do t[k] = nil end
 	end
 	S.sent = nil
@@ -141,7 +181,7 @@ function M.press()
 	local unit = api.game.my_unit()
 	if not unit then return end
 	local _, o = record_of(unit)
-	if not o or o.stock.count <= 0 or S.pending[unit] then return end
+	if not o or o.stock.count <= 0 or S.pending[unit] or not M.refreshed(S.since[unit]) then return end
 	local name, downed = state_of(unit)
 	if not M.can_start(name, downed) then return end
 	S.motions[unit] = { t = 0 }
@@ -152,6 +192,7 @@ local function stab(st, unit, o)
 	if not stock.take(o.stock) then return end
 	o.used = o.used + 1
 	S.boosts[unit] = M.BOOST
+	S.since[unit] = 0
 	if not S.stamina_on[unit] then
 		api.game.command(unit, "character", "infinite_stamina", true)
 		S.stamina_on[unit] = true
@@ -234,6 +275,14 @@ local function frame(dt)
 			play(volume * M.FAR)
 		end
 		if S.motions[unit] and not anim.sample(m) then S.motions[unit] = nil end
+		if S.motions[unit] and not m.remote and record_of(unit) then slow(unit) end
+	end
+	for unit in pairs(S.slowed) do
+		if not S.motions[unit] then unslow(unit) end
+	end
+	for unit, t in pairs(S.since) do
+		t = t + dt
+		S.since[unit] = (t < M.BOOST + M.EDGE_FADE + M.REFRESH and g("Unit").alive(unit)) and t or nil
 	end
 	boost(dt)
 	listen(st)
@@ -256,6 +305,12 @@ function M.count_of(inventory)
 	end
 	-- A card seen before its player's numbers arrive shows a full START.
 	return stock.START
+end
+
+-- How strong the screen edge of this player's Helldiver is now.
+function M.edge_now()
+	local unit = api and api.game.my_unit()
+	return unit and M.edge_strength(S.since[unit]) or 0
 end
 
 -- An ammo box: REFILL more for the Helldiver it went to, when this machine plays it.

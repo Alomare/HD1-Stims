@@ -13,17 +13,20 @@ local M = {}
 
 local function g(name) return rawget(_G, name) end
 
--- Timeline in seconds. The stim takes effect at STAB, unless the motion was cut short before.
-M.LENGTH = 0.9
-M.STAB = 0.42
-M.RAISE = 0.28   -- the arm is up at this time
-M.LOWER = 0.62   -- and starts down here
+-- Timeline in seconds, in four steps: the fist comes up beside the neck (to RAISE), jabs in (to STAB,
+-- where the stim takes effect unless the motion was cut short before), holds, comes back out to the
+-- fist (UNJAB to LOWER), then goes down to the game's pose (to LENGTH).
+M.RAISE = 0.40
+M.STAB = 0.56
+M.UNJAB = 0.72
+M.LOWER = 0.88
+M.LENGTH = 1.28
 M.OUT = 0.18     -- blend back to the game's pose when cut short
 
 -- Where the wrist goes, from the neck, in the Helldiver's axes (x right, y forward, z up), metres; JAB
 -- moves it closer at the stab.
-M.OFF = { x = -0.17, y = 0.07, z = -0.03 }
-M.JAB = { x = 0.045, y = -0.02, z = 0.0 }
+M.OFF = { x = -0.20, y = 0.08, z = -0.03 }
+M.JAB = { x = 0.07, y = -0.025, z = 0.0 }
 -- The elbow bends toward this point, from the shoulder.
 M.POLE = { x = -0.45, y = 0.25, z = -0.25 }
 -- The hand points this way (wrist to knuckles), thumb up: the back of the hand faces forward.
@@ -50,9 +53,9 @@ function M.weights(t)
 	else w = 1 - smooth((t - M.LOWER) / (M.LENGTH - M.LOWER)) end
 	local j
 	if t < M.RAISE then j = 0
-	elseif t < M.STAB - 0.02 then j = smooth((t - M.RAISE) / (M.STAB - 0.02 - M.RAISE))
-	elseif t < M.LOWER - 0.06 then j = 1
-	else j = 1 - smooth((t - (M.LOWER - 0.06)) / 0.08) end
+	elseif t < M.STAB then j = smooth((t - M.RAISE) / (M.STAB - M.RAISE))
+	elseif t < M.UNJAB then j = 1
+	else j = 1 - smooth((t - M.UNJAB) / (M.LOWER - M.UNJAB)) end
 	return w, j
 end
 

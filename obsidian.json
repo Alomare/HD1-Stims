@@ -14,6 +14,7 @@
   "requires": ["obsidian.api"],
   "resources": [
     { "type": "texture", "name": "stims/hud/stims_syringe", "bundle": "9cf71054ea26dddf", "data": "res/hud_syringe.texture" },
+    { "type": "texture", "name": "stims/hud/stims_edge", "bundle": "9cf71054ea26dddf", "data": "res/hud_edge.texture" },
     { "type": "material", "name": "stims/hud", "bundle": "9cf71054ea26dddf", "data": "res/hud.material" }
   ],
   "options": [
