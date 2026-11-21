@@ -18,6 +18,9 @@
     { "type": "material", "name": "stims/hud", "bundle": "9cf71054ea26dddf", "data": "res/hud.material" }
   ],
   "options": [
+    { "id": "preserve_passive_healing", "type": "toggle", "default": false,
+      "label": { "en": "Preserve passive healing" },
+      "description": { "en": "Keeps the slow health regeneration of the game. Off by default, so health comes back only through stims and other healing." } },
     { "id": "volume", "type": "number", "default": 0.7, "min": 0, "max": 1, "step": 0.05, "scope": "client",
       "label": { "en": "Stim sound volume" },
       "description": { "en": "How loud the stim sound plays. Other players' stims nearby play quieter." } }

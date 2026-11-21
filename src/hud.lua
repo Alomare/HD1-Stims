@@ -1,5 +1,6 @@
--- The syringe on each player's loadout card, right of the weapon: one cell per stim carried, white while
--- the player has it and grey once used, as the game draws grenades.
+-- The syringe on each player's loadout card, right of the weapon, in four charges from the top (the tip,
+-- two barrel cells, the end): the first stim used greys out the tip, the last one the end. Charges still
+-- carried are white, as the game draws grenades.
 --
 -- A gui draws only the materials it was made with, so the mod's material (res/hud.material, in the boot
 -- bundle, which is always loaded) joins the list when the game makes the HUD's gui ("hud_gui", HdGui.init).
@@ -15,7 +16,7 @@ local M = {}
 local function g(name) return rawget(_G, name) end
 
 M.MATERIAL = "stims/hud"
-M.X, M.Y, M.Z = 150, 4, 4  -- bottom left corner on the card, design units (y up)
+M.X, M.Y, M.Z = 154, 4, 4  -- bottom left corner on the card, design units (y up)
 M.HEIGHT = 31              -- the syringe's height, design units
 -- The game's card icons are drawn white over textures about 0.78 white (198 of 255 measured on screen);
 -- the syringe's texture is pure white, so it is tinted to match. Empty cells take the grenades' grey
@@ -35,9 +36,8 @@ function M.bands(count, height)
 	local function band(v, lit)
 		out[#out + 1] = { v[1], v[2], (1 - v[2]) * height, (v[2] - v[1]) * height, lit }
 	end
-	band(layout.top, count > 0)
-	band(layout.bottom, count > 0)
-	for i, v in ipairs(layout.cells) do band(v, i <= count) end
+	local n = #layout.segments
+	for i, v in ipairs(layout.segments) do band(v, i > n - count) end
 	return out
 end
 

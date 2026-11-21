@@ -1,5 +1,7 @@
--- The stim motion: the left arm comes up with a fist, back of the hand forward, and jabs the injector
--- into the left side of the neck. The game has no such animation, so the bones of the left arm are set
+-- The stim motion, in the user's drawing: the left upper arm comes out level to the side with the
+-- forearm up and the fist raised, back of the hand forward (the arm at 90 degrees); the forearm folds in
+-- so the fist stabs the left side of the neck, the elbow staying out; the arm goes back to the raised
+-- fist, then down to the game's pose. The game has no such animation, so the bones of the left arm are set
 -- on top of whatever the game plays, just before World.update_scene of the game world (the bones then
 -- hold the animation of this frame; a turn set later isn't drawn, as Eyes of Liberty found for its aim
 -- pose). Every machine poses every Helldiver it shows, so other players see it too (late by the lobby).
@@ -13,26 +15,27 @@ local M = {}
 
 local function g(name) return rawget(_G, name) end
 
--- Timeline in seconds, in four steps: the fist comes up beside the neck (to RAISE), jabs in (to STAB,
--- where the stim takes effect unless the motion was cut short before), holds, comes back out to the
--- fist (UNJAB to LOWER), then goes down to the game's pose (to LENGTH).
+-- Timeline in seconds: the arm eases up to the raised fist (to RAISE), stabs in fast and even (to STAB,
+-- where the stim takes effect unless the motion was cut short before), holds a moment (to RELEASE), then
+-- goes from the stab straight back to the game's pose (to LENGTH).
 M.RAISE = 0.40
-M.STAB = 0.56
-M.UNJAB = 0.72
-M.LOWER = 0.88
-M.LENGTH = 1.28
+M.STAB = 0.50
+M.RELEASE = 0.62
+M.LENGTH = 0.95
 M.OUT = 0.18     -- blend back to the game's pose when cut short
 
--- Where the wrist goes, from the neck, in the Helldiver's axes (x right, y forward, z up), metres; JAB
--- moves it closer at the stab.
-M.OFF = { x = -0.20, y = 0.08, z = -0.03 }
-M.JAB = { x = 0.07, y = -0.025, z = 0.0 }
--- The elbow bends toward this point, from the shoulder.
-M.POLE = { x = -0.45, y = 0.25, z = -0.25 }
--- The hand points this way (wrist to knuckles), thumb up: the back of the hand faces forward.
-M.HAND = { x = 1, y = -0.25, z = 0.1 }
+-- Directions in the Helldiver's axes (x right, y forward, z up). The upper arm points ELBOW from the
+-- shoulder when raised, ELBOW_STAB at the stab (a little forward and in, so the fist reaches the neck).
+M.ELBOW = { x = -1, y = 0.12, z = -0.05 }
+M.ELBOW_STAB = { x = -0.85, y = 0.4, z = -0.1 }
+-- The forearm points FIST_UP when raised; at the stab it points at NECK_SIDE (metres from the neck node),
+-- and the fist (FIST metres past the wrist) lands there.
+M.FIST_UP = { x = 0.05, y = 0.1, z = 1 }
+-- The neck node sits about 0.16 m behind the shoulders (measured 2026-11-21), so the stab lands well in
+-- front of it, under the jaw, where the fist shows past the shoulder armour from the game camera.
+M.NECK_SIDE = { x = -0.13, y = 0.13, z = 0.04 }
+M.FIST = 0.09
 M.THUMB_LOCAL = P.normalize({ x = 0, y = -0.039, z = -0.051 })
-M.UP = { x = 0, y = 0, z = 1 }
 -- Fingers close into a fist: each joint turns CURL degrees about CURL_AXIS (local).
 M.CURL = 75
 M.CURL_AXIS = { x = 0, y = 0, z = 1 }
@@ -49,13 +52,11 @@ end
 function M.weights(t)
 	local w
 	if t < M.RAISE then w = smooth(t / M.RAISE)
-	elseif t < M.LOWER then w = 1
-	else w = 1 - smooth((t - M.LOWER) / (M.LENGTH - M.LOWER)) end
-	local j
-	if t < M.RAISE then j = 0
-	elseif t < M.STAB then j = smooth((t - M.RAISE) / (M.STAB - M.RAISE))
-	elseif t < M.UNJAB then j = 1
-	else j = 1 - smooth((t - M.UNJAB) / (M.LOWER - M.UNJAB)) end
+	elseif t < M.RELEASE then w = 1
+	else w = 1 - smooth((t - M.RELEASE) / (M.LENGTH - M.RELEASE)) end
+	local j = 0
+	if t >= M.STAB then j = 1
+	elseif t > M.RAISE then j = (t - M.RAISE) / (M.STAB - M.RAISE) end
 	return w, j
 end
 
@@ -86,15 +87,18 @@ end
 -- Answers the local rotations of the shoulder, elbow and wrist in the full pose.
 function M.solve(b, j)
 	local a, l = P.length(P.sub(b.e, b.s)), P.length(P.sub(b.w, b.e))
-	local off = { x = M.OFF.x + M.JAB.x * j, y = M.OFF.y + M.JAB.y * j, z = M.OFF.z + M.JAB.z * j }
-	local target = P.add(b.neck, axes(b, off))
-	local pole = P.add(b.s, axes(b, M.POLE))
-	local elbow, wrist = P.two_bone(b.s, target, a, l, pole)
-	local hinge = P.hinge(b.s, elbow, wrist) or P.normalize(P.cross(P.sub(elbow, b.s), b.up))
-	local rs = P.align(X, b.hs, P.sub(elbow, b.s), hinge)
-	local re = P.align(X, b.he, P.sub(wrist, elbow), hinge)
-	local rw = P.align(X, M.THUMB_LOCAL, axes(b, M.HAND), b.up)
-	return P.mul(P.conj(b.rp), rs), P.mul(P.conj(rs), re), P.mul(P.conj(re), rw), wrist
+	local edir = P.normalize(P.lerp(P.normalize(axes(b, M.ELBOW)), P.normalize(axes(b, M.ELBOW_STAB)), j))
+	local elbow = P.add(b.s, P.scale(edir, a))
+	local target = P.add(b.neck, axes(b, M.NECK_SIDE))
+	local stab = P.normalize(P.sub(target, elbow))
+	local d = P.normalize(P.lerp(P.normalize(axes(b, M.FIST_UP)), stab, j))
+	local wrist = P.add(elbow, P.scale(d, l))
+	local hinge = P.hinge(b.s, elbow, wrist) or P.normalize(P.cross(edir, b.up))
+	local rs = P.align(X, b.hs, edir, hinge)
+	local re = P.align(X, b.he, d, hinge)
+	-- The hand along the forearm, palm to the back: the back of the hand faces forward.
+	local rw = P.align(X, M.THUMB_LOCAL, d, P.cross(d, P.scale(b.fwd, -1)))
+	return P.mul(P.conj(b.rp), rs), P.mul(P.conj(rs), re), P.mul(P.conj(re), rw), wrist, P.add(wrist, P.scale(d, M.FIST))
 end
 
 -- The hinge of the arm as it stands, in the shoulder's and the elbow's local axes, or nil when the arm
@@ -212,6 +216,23 @@ function M.pose(api, world, unit, w, j)
 	W.update_unit(world, unit)
 	for _, u in ipairs(linked(api, unit)) do W.update_unit(world, u) end
 	return true
+end
+
+-- A small blood splash at the left side of the neck of `unit`, at the stab: the game's own bullet-on-flesh
+-- particle (effect_settings: bullet hits on "flesh"). Particles of a package that isn't loaded stop the
+-- game, and the engine has no way to ask (no Application.can_get in this build, checked 2026-11-21). The
+-- game plays this one for any bullet that hits a Helldiver, whose surface is flesh, so it is loaded in
+-- every mission; it is spawned in missions only.
+M.SPLASH = "effects/surface_effects/projectile_flesh"
+function M.splash(unit)
+	local U, Q, W = g("Unit"), g("Quaternion"), g("World")
+	if not (U.alive(unit) and U.has_node(unit, "neck")) then return false end
+	local world = M.game_world()
+	if not world then return false end
+	local root = U.world_rotation(unit, 0)
+	local left = -Q.right(root)
+	local pos = U.world_position(unit, U.node(unit, "neck")) + left * 0.08 + Q.forward(root) * 0.04
+	return pcall(W.create_particles, world, M.SPLASH, pos, Q.look(left, Q.up(root)))
 end
 
 -- The game world, where the Helldivers are.

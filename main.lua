@@ -30,6 +30,7 @@ stim.start({
 	log = obsidian.log,
 	volume = obsidian.module("src/sound").gain(obsidian.settings.get("volume")),
 	sounds = obsidian.module("src/sounds"),
+	keep_regen = obsidian.settings.get("preserve_passive_healing") == true,
 })
 hud.start(stim.count_of, obsidian.log, stim.edge_now)
 

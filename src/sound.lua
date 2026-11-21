@@ -85,28 +85,46 @@ function M.new(variants)
 	local hwo = handle[0]
 	local size = ffi.sizeof("stims_WAVEHDR")
 	local header = ffi.new("stims_WAVEHDR")
-	local buffer, prepared = nil, false
-	local cache = {} -- "<variant>:<volume step>" -> samples
+	local prepared = false
+	-- Samples scaled in place in an int16 array, made once per variant and volume step and kept: the
+	-- buffer Windows reads from must live while it plays, and a loop over cdata is fast where string
+	-- work on a second of stereo 48 kHz would hitch a frame.
+	local cache = {} -- "<variant>:<volume step>" -> { buffer, bytes }
+	local function samples(i, step)
+		local key = i .. ":" .. step
+		local got = cache[key]
+		if got then return got end
+		local wav = variants[i]
+		local bytes = #wav - M.HEAD
+		local n = math.floor(bytes / 2)
+		local buf = ffi.new("int16_t[?]", n)
+		ffi.copy(buf, ffi.cast("const char *", wav) + M.HEAD, n * 2)
+		local k = step / 20
+		if k < 1 then
+			for s = 0, n - 1 do buf[s] = math.floor(buf[s] * k + 0.5) end
+		end
+		got = { buf, n * 2 }
+		cache[key] = got
+		return got
+	end
 	local player = {}
+	local function step_of(volume) return math.floor(math.max(0, math.min(1, volume or 1)) * 20 + 0.5) end
+	-- Makes the samples for a volume ahead, at boot, so the first stim doesn't wait for them.
+	function player.warm(volume)
+		local step = step_of(volume)
+		if step > 0 then for i = 1, #variants do samples(i, step) end end
+	end
 	function player.play(volume)
 		local i = math.random(#variants)
-		local step = math.floor(math.max(0, math.min(1, volume or 1)) * 20 + 0.5)
+		local step = step_of(volume)
 		if step == 0 then return false end
-		local key = i .. ":" .. step
-		local data = cache[key]
-		if not data then
-			data = M.scaled(variants[i], step / 20):sub(M.HEAD + 1)
-			cache[key] = data
-		end
+		local data = samples(i, step)
 		if prepared then
 			winmm.waveOutReset(hwo)
 			winmm.waveOutUnprepareHeader(hwo, header, size)
 			prepared = false
 		end
-		-- The bytes stay in this player's buffer while Windows reads them.
-		buffer = ffi.new("char[?]", #data)
-		ffi.copy(buffer, data, #data)
-		header.lpData, header.dwBufferLength, header.dwFlags, header.dwLoops = buffer, #data, 0, 0
+		header.lpData, header.dwBufferLength, header.dwFlags, header.dwLoops = ffi.cast("char *", data[1]), data[2], 0, 0
 		if winmm.waveOutPrepareHeader(hwo, header, size) ~= 0 then return false end
 		prepared = true
 		return winmm.waveOutWrite(hwo, header, size) == 0

@@ -4,7 +4,7 @@ files beside the scripts. One variant plays at random with each stim.
 Usage: python tools/build_sound.py <wav> [<wav> ...]
 
 With no files, the WAVs in internal/sound (the last ones used) are read again. Each source goes through
-ffmpeg: mono, 16-bit, 22.05 kHz, no tags, raised to a peak of -1 dB, then written as the plain 44-byte
+ffmpeg: stereo, 16-bit, 48 kHz (the recording as it is), no tags, raised to a peak of -1 dB, then written as the plain 44-byte
 WAV that src/sound.lua reads (RIFF, fmt and data and nothing else).
 """
 import shutil
@@ -15,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 KEEP = ROOT / "internal" / "sound"
 OUT = ROOT / "src" / "sounds.lua"
-RATE = 22050
+RATE = 48000
+CHANNELS = 2
 
 
 def ffmpeg(*args):
@@ -24,7 +25,7 @@ def ffmpeg(*args):
 
 def plain(source, tmp):
     raw = tmp / "raw.wav"
-    ffmpeg("-i", str(source), "-ac", "1", "-ar", str(RATE), "-c:a", "pcm_s16le", "-map_metadata", "-1",
+    ffmpeg("-i", str(source), "-ac", str(CHANNELS), "-ar", str(RATE), "-c:a", "pcm_s16le", "-map_metadata", "-1",
            "-fflags", "+bitexact", "-flags:a", "+bitexact", str(raw))
     probe = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(raw), "-af", "volumedetect", "-f", "null", "-"],
                            capture_output=True, text=True).stderr
@@ -59,7 +60,7 @@ def main():
     shutil.rmtree(tmp)
     body = ",\n\t".join(lua_string(v) for v in variants)
     OUT.write_text(
-        "-- The stim sound's variants: mono 16-bit 22.05 kHz WAVs, written by tools/build_sound.py. Do not edit.\n"
+        "-- The stim sound variants: stereo 16-bit 48 kHz WAVs, written by tools/build_sound.py. Do not edit.\n"
         "return {\n\t" + body + ",\n}\n", encoding="utf-8", newline="\n")
     print(OUT, len(variants), "variants", sum(len(v) for v in variants), "bytes")
 

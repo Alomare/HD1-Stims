@@ -5,7 +5,8 @@ Usage: python tools/build_hud.py [perk icon]
 
 The syringe is the game's Adrenaline perk icon (perk_adrenaline_01, read from the game through Minediver;
 Mods/_assets/perk_icons holds a copy) made one solid shape: every pixel the icon covers, holes filled,
-turned upright with the needle at the top. The barrel is cut into SEGMENTS cells by clear lines, one cell
+turned upright with the needle at the top. It is cut into SEGMENTS charges by clear lines (the tip, the
+barrel in two, the end), one
 per stim, and the rows of each cell are written to res/hud_layout.lua for src/hud.lua, which draws each
 cell as its own band of the texture.
 
@@ -194,13 +195,13 @@ def main():
     (b0, b1), widths = barrel_rows(alpha)
     if "--widths" in sys.argv: print(list(enumerate(widths.tolist())))
     gap = max(2, int(round(GAP * HEIGHT)))
-    # SEGMENTS equal cells from b0 to b1, a clear line of `gap` rows between two.
-    cell = (b1 - b0 + 1 - gap * (SEGMENTS - 1)) / SEGMENTS
-    cells = []
-    for i in range(SEGMENTS):
-        top = b0 + i * (cell + gap)
-        cells.append((int(round(top)), int(round(top + cell)) - 1))
-    for (t0, t1), (n0, _) in zip(cells, cells[1:]):
+    h = alpha.shape[0]
+    # SEGMENTS (4) charges from the top: the tip (needle, hub and grips, above the barrel), the barrel cut
+    # in two, and the end (below the barrel). A clear line of `gap` rows parts each from the next, taken
+    # out of the barrel.
+    mid = (b0 + b1) // 2
+    segments = [(0, b0 - 1), (b0 + gap, mid - gap // 2 - 1), (mid + (gap + 1) // 2, b1 - gap), (b1 + 1, h - 1)]
+    for (t0, t1), (n0, _) in zip(segments, segments[1:]):
         alpha[t1 + 1:n0, :] = 0
     h, w = alpha.shape
     rgba = np.dstack([np.full((h, w, 3), 255, np.uint8), (alpha * 255 + 0.5).astype(np.uint8)])
@@ -209,40 +210,35 @@ def main():
     (RES / "hud_syringe.texture").write_bytes(dds_rgba(image))
     (RES / "hud_edge.texture").write_bytes(dds_rgba(edge()))
     (RES / "hud.material").write_bytes(material([SPRITE, EDGE]))
-    # Bands in texture rows from the top, as shares of the height: the cells bottom first (stim 1 is the
-    # lowest cell), and the parts above and below the barrel.
+    # Bands in texture rows from the top, as shares of the height, top first: the first stim used greys
+    # out the first band.
     v = lambda row: round(row / h, 5)
     lines = [
         "-- Written by tools/build_hud.py. Do not edit.",
-        "-- The syringe texture's bands as shares of its height from the top (v), stim 1 the lowest cell.",
+        "-- The syringe texture's charges as bands of v (shares of its height from the top), top first: the",
+        "-- tip, two barrel cells and the end. The first stim used greys out the tip.",
         "return {",
-        f"\tsprite = \"{SPRITE}\",",
-        f"\taspect = {round(w / h, 5)}, -- width over height",
-        f"\ttop = {{ 0, {v(cells[0][0])} }}, -- the needle and hub",
-        f"\tbottom = {{ {v(cells[-1][1] + 1)}, 1 }}, -- the flange and plunger",
-        "\tcells = {",
+        f"	sprite = \"{SPRITE}\",",
+        f"	aspect = {round(w / h, 5)}, -- width over height",
+        "	segments = {",
     ]
-    for t0, t1 in reversed(cells):
-        lines.append(f"\t\t{{ {v(t0)}, {v(t1 + 1)} }},")
-    lines += ["\t},", "}", ""]
+    for t0, t1 in segments:
+        lines.append(f"		{{ {v(t0)}, {v(t1 + 1)} }},")
+    lines += ["	},", "}", ""]
     (ROOT / "src" / "hud_layout.lua").write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    cells = segments
     # A look over the card's brown, at three sizes, full and with two stims.
     preview = Image.new("RGBA", (w * 4 + 80, h + 20), (92, 70, 48, 255))
     preview.alpha_composite(image, (10, 10))
-    grey = image.copy()
-    ga = np.asarray(grey).copy()
-    ga[..., :3] = 128
-    for t0, t1 in cells[:2]:
-        pass
     two = np.asarray(image).copy()
-    for t0, t1 in cells[:2]:  # the top two cells empty: two stims left
+    for t0, t1 in cells[:2]:  # two stims used: the tip and the first barrel cell grey
         two[t0:t1 + 1, :, :3] = 128
     preview.alpha_composite(Image.fromarray(two, "RGBA"), (w + 30, 10))
     small = image.resize((max(1, w * 40 // h), 40), Image.Resampling.LANCZOS)
     preview.alpha_composite(small, (2 * w + 60, 10))
     (ROOT / "internal").mkdir(exist_ok=True)
     preview.save(ROOT / "internal" / "hud_preview.png")
-    print("size", w, h, "barrel rows", b0, b1, "cells", cells)
+    print("size", w, h, "barrel rows", b0, b1, "segments", segments)
     print(SPRITE, f"{BASE}/{SPRITE}", hex(murmur64(f'{BASE}/{SPRITE}'.encode())))
 
 

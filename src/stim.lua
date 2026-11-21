@@ -7,6 +7,12 @@
 -- a reload, a throw, a melee or anything else outside the states in KEEP before the stab cuts the motion
 -- short and keeps the stim.
 --
+-- Passive healing: the game heals a Helldiver 2 hitpoints a second (health_decay -2 in the Helldiver's
+-- health_info; the Adrenaline perk makes it 12), as a negative hitpoints_decay. Unless the option
+-- preserve_passive_healing is on, a negative decay of an own Helldiver is set to 0 (set_health_decay 0),
+-- every frame, as respawns and perks set it again. A positive decay (damage over time) is left alone, and
+-- so is Obsidian API's regen effect. set_health_decay with no value gives the game's own back.
+--
 -- Health and stamina belong to the machine that plays the body, so each machine boosts only its own
 -- Helldivers. The others learn the count and each stim through lobby data (src/sync.lua) and play the
 -- motion and the sound from there, about a second late.
@@ -19,7 +25,7 @@ local M = {}
 local function g(name) return rawget(_G, name) end
 
 M.BOOST = 4
-M.HEAL = 80
+M.HEAL = 60
 M.REFRESH = 3      -- seconds after a stim takes effect before another can start
 -- While the motion plays the Helldiver moves as when aiming: the aim speed over the jog speed of the
 -- Helldiver's character_info (1.5 / 4), through the mover's velocity_scale (as Obsidian API's speed).
@@ -68,12 +74,13 @@ local S = {
 	stamina_on = {},   -- unit -> true while the boost holds the stamina
 	since = {},        -- unit -> seconds since the last own stim took effect
 	slowed = {},       -- unit -> true while the motion slows it
+	no_regen = {},     -- unit -> true once passive healing was taken off
 	remote = {},       -- unit -> stims, from other machines
 	seen = {},         -- "<peer>:<id>" -> used, the last count of stims seen
 	sent = nil,
 }
 
-local api, log, player, volume
+local api, log, player, volume, keep_regen
 
 local function state_of(unit)
 	local ch = api.game.master(unit, "character")
@@ -146,8 +153,13 @@ local function reset()
 		end
 	end
 	for unit in pairs(S.slowed) do pcall(unslow, unit) end
+	for unit in pairs(S.no_regen) do
+		if g("Unit").alive(unit) and not api.effects.is_on("regen") then
+			pcall(api.game.command, unit, "health", "set_health_decay", nil)
+		end
+	end
 	-- Emptied in place: src/anim.lua holds S.motions.
-	for _, t in ipairs({ S.own, S.motions, S.pending, S.boosts, S.stamina_on, S.remote, S.seen, S.since, S.slowed }) do
+	for _, t in ipairs({ S.own, S.motions, S.pending, S.boosts, S.stamina_on, S.remote, S.seen, S.since, S.slowed, S.no_regen }) do
 		for k in pairs(t) do t[k] = nil end
 	end
 	S.sent = nil
@@ -228,6 +240,18 @@ local function boost(dt)
 	end
 end
 
+-- Passive healing off for the own Helldivers (see the top).
+local function no_regen()
+	if api.effects.is_on("regen") then return end
+	for _, o in pairs(S.own) do
+		local health = api.game.master(o.unit, "health")
+		if health and type(health.hitpoints_decay) == "number" and health.hitpoints_decay < 0 then
+			api.game.command(o.unit, "health", "set_health_decay", 0)
+			S.no_regen[o.unit] = true
+		end
+	end
+end
+
 -- Stims of the other machines' Helldivers: counts for the cards, and a motion for each new stim.
 local function listen(st)
 	local now = {}
@@ -269,10 +293,14 @@ local function frame(dt)
 			elseif before < anim.STAB and m.t >= anim.STAB then
 				S.pending[unit] = nil
 				local _, o = record_of(unit)
-				if o then stab(st, unit, o) end
+				if o then
+					stab(st, unit, o)
+					anim.splash(unit)
+				end
 			end
-		elseif m.remote and not m.cut and before < anim.STAB and m.t >= anim.STAB and heard_from(unit) then
-			play(volume * M.FAR)
+		elseif m.remote and not m.cut and before < anim.STAB and m.t >= anim.STAB then
+			anim.splash(unit)
+			if heard_from(unit) then play(volume * M.FAR) end
 		end
 		if S.motions[unit] and not anim.sample(m) then S.motions[unit] = nil end
 		if S.motions[unit] and not m.remote and record_of(unit) then slow(unit) end
@@ -284,6 +312,7 @@ local function frame(dt)
 		t = t + dt
 		S.since[unit] = (t < M.BOOST + M.EDGE_FADE + M.REFRESH and g("Unit").alive(unit)) and t or nil
 	end
+	if not keep_regen then no_regen() end
 	boost(dt)
 	listen(st)
 	share(st)
@@ -331,10 +360,17 @@ end
 function M.start(env)
 	api, log = env.api, env.log
 	volume = env.volume
+	keep_regen = env.keep_regen
 	M.FAR = obsidian.module("src/sound").FAR_GAIN
 	if env.sounds then
 		local made, why = obsidian.module("src/sound").new(env.sounds)
-		if made then player = made else log("no stim sound: " .. tostring(why)) end
+		if made then
+			player = made
+			pcall(made.warm, volume)
+			pcall(made.warm, volume * M.FAR)
+		else
+			log("no stim sound: " .. tostring(why))
+		end
 	end
 	anim.start(api, S.motions, log)
 	obsidian.on_frame(function()
