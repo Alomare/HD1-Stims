@@ -1,0 +1,315 @@
+-- The stims of every Helldiver this machine plays, the key, the boost, ammo boxes, and what the other
+-- machines are told and shown.
+--
+-- A stim: the key starts the motion (src/anim.lua) when the Helldiver stands, walks, runs or aims and
+-- has a stim. At anim.STAB the stim is spent, the sound plays and the boost starts: BOOST seconds of
+-- infinite stamina and HEAL hitpoints a second, up to the maximum. A dive, a knockdown, being downed,
+-- a reload, a throw, a melee or anything else outside the states in KEEP before the stab cuts the motion
+-- short and keeps the stim.
+--
+-- Health and stamina belong to the machine that plays the body, so each machine boosts only its own
+-- Helldivers. The others learn the count and each stim through lobby data (src/sync.lua) and play the
+-- motion and the sound from there, about a second late.
+local stock = obsidian.module("src/stock")
+local sync = obsidian.module("src/sync")
+local anim = obsidian.module("src/anim")
+
+local M = {}
+
+local function g(name) return rawget(_G, name) end
+
+M.BOOST = 4
+M.HEAL = 80
+-- States a stim can start in, and states the motion goes on through.
+M.START = { CharacterStateIdle = true, CharacterStateWalk = true, CharacterStateSprint = true,
+	CharacterStateAim = true, CharacterStateAimWalk = true }
+M.KEEP = { CharacterStateIdle = true, CharacterStateWalk = true, CharacterStateSprint = true,
+	CharacterStateAim = true, CharacterStateAimWalk = true, CharacterStateFire = true,
+	CharacterStateWalkFire = true, CharacterStateAimFire = true, CharacterStateAimWalkFire = true }
+
+-- Whether a Helldiver in this character state, downed or not, can start a stim, or keep one going.
+function M.can_start(state_name, downed) return not downed and M.START[state_name] == true end
+function M.can_keep(state_name, downed) return not downed and M.KEEP[state_name] == true end
+
+-- The hitpoints a frame of boost adds: HEAL a second, never past the maximum. Pure, for tests.
+function M.heal_step(hp, max, dt)
+	if not (hp and max) or hp >= max then return 0 end
+	return math.min(M.HEAL * dt, max - hp)
+end
+
+local S = {
+	mission = nil,     -- the game state object of the mission these belong to
+	own = {},          -- player record -> { unit, stock, used }
+	motions = {},      -- unit -> motion (every Helldiver being shown a stim)
+	pending = {},      -- unit -> record, own stims before the stab
+	boosts = {},       -- unit -> seconds left
+	stamina_on = {},   -- unit -> true while the boost holds the stamina
+	remote = {},       -- unit -> stims, from other machines
+	seen = {},         -- "<peer>:<id>" -> used, the last count of stims seen
+	sent = nil,
+}
+
+local api, log, player, volume
+
+local function state_of(unit)
+	local ch = api.game.master(unit, "character")
+	local name = ch and ch.current_state and ch.current_state.name
+	local health = api.game.master(unit, "health")
+	return name, health and (health.is_downed or health.is_dead) or false, health
+end
+
+local function go_id(st, unit)
+	local storage = st and st.entity_storage
+	if not storage then return nil end
+	local ok, id = pcall(storage.go_id, storage, unit)
+	return ok and type(id) == "number" and id or nil
+end
+
+local function unit_of_id(st, id)
+	local storage = st and st.entity_storage
+	if not storage then return nil end
+	local ok, unit = pcall(storage.unit, storage, id)
+	return ok and unit or nil
+end
+
+local function heard_from(unit)
+	local mine = api.game.my_unit()
+	local U = g("Unit")
+	if not (mine and U.alive(mine) and U.alive(unit)) then return false end
+	local a, b = U.world_position(mine, 0), U.world_position(unit, 0)
+	local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
+	return dx * dx + dy * dy + dz * dz <= 25 * 25
+end
+
+local function play(gain)
+	if player then pcall(player.play, gain) end
+end
+
+-- Shares the counts of this machine's Helldivers when they changed.
+local function share(st)
+	local entries = {}
+	for _, o in pairs(S.own) do
+		local id = go_id(st, o.unit)
+		if id then entries[#entries + 1] = { id = id, count = o.stock.count, used = o.used } end
+	end
+	table.sort(entries, function(a, b) return a.id < b.id end)
+	local text = sync.encode(st.mission_seed, entries)
+	if text ~= S.sent then
+		local ok = api.lobby.share(sync.NAME, text)
+		if ok then S.sent = text end
+	end
+end
+
+local function reset()
+	for unit in pairs(S.stamina_on) do
+		if g("Unit").alive(unit) and not api.effects.is_on("infinite_stamina") then
+			pcall(api.game.command, unit, "character", "infinite_stamina", false)
+		end
+	end
+	-- Emptied in place: src/anim.lua holds S.motions.
+	for _, t in ipairs({ S.own, S.motions, S.pending, S.boosts, S.stamina_on, S.remote, S.seen }) do
+		for k in pairs(t) do t[k] = nil end
+	end
+	S.sent = nil
+end
+
+-- The own Helldivers: a new unit for a record is a new drop or a respawn, with a fresh START.
+local function refresh(st)
+	local alive = {}
+	for _, a in ipairs(api.game.all_avatars()) do
+		if a.owned then
+			alive[a.record] = true
+			local o = S.own[a.record]
+			if not o then
+				S.own[a.record] = { unit = a.unit, stock = stock.new(), used = 0 }
+			elseif o.unit ~= a.unit then
+				o.unit, o.stock = a.unit, stock.new()
+			end
+		end
+	end
+	for rec in pairs(S.own) do if not alive[rec] then S.own[rec] = nil end end
+end
+
+local function record_of(unit)
+	for rec, o in pairs(S.own) do if o.unit == unit then return rec, o end end
+	return nil
+end
+
+-- The key: a stim for this player's Helldiver, when one can start.
+function M.press()
+	if not api.game.in_mission() then return end
+	local unit = api.game.my_unit()
+	if not unit then return end
+	local _, o = record_of(unit)
+	if not o or o.stock.count <= 0 or S.pending[unit] then return end
+	local name, downed = state_of(unit)
+	if not M.can_start(name, downed) then return end
+	S.motions[unit] = { t = 0 }
+	S.pending[unit] = true
+end
+
+local function stab(st, unit, o)
+	if not stock.take(o.stock) then return end
+	o.used = o.used + 1
+	S.boosts[unit] = M.BOOST
+	if not S.stamina_on[unit] then
+		api.game.command(unit, "character", "infinite_stamina", true)
+		S.stamina_on[unit] = true
+	end
+	play(volume)
+	share(st)
+end
+
+local function boost(dt)
+	for unit, left in pairs(S.boosts) do
+		local _, downed, health = state_of(unit)
+		left = left - dt
+		if left <= 0 or not g("Unit").alive(unit) then
+			S.boosts[unit] = nil
+			if S.stamina_on[unit] then
+				if g("Unit").alive(unit) and not api.effects.is_on("infinite_stamina") then
+					api.game.command(unit, "character", "infinite_stamina", false)
+				end
+				S.stamina_on[unit] = nil
+			end
+		else
+			S.boosts[unit] = left
+			local ch = api.game.master(unit, "character")
+			local lsm = g("LuaSettingsManager")
+			local settings = lsm and lsm:get_settings_by_unit(unit)
+			local info = settings and settings.character_info
+			if ch then ch.sprint_stamina = info and info.sprint_stamina or 5 end
+			if health and not downed then
+				local step = M.heal_step(health.hitpoints_real, health.max_hitpoints, dt)
+				if step > 0 then api.game.command(unit, "health", "do_heal", step) end
+			end
+		end
+	end
+end
+
+-- Stims of the other machines' Helldivers: counts for the cards, and a motion for each new stim.
+local function listen(st)
+	local now = {}
+	for peer, text in pairs(api.lobby.shared(sync.NAME) or {}) do
+		for _, e in ipairs(sync.decode(text, st.mission_seed)) do
+			local unit = unit_of_id(st, e.id)
+			if unit and g("Unit").alive(unit) and not record_of(unit) then
+				now[unit] = e.count
+				local key = tostring(peer) .. ":" .. e.id
+				local last = S.seen[key]
+				S.seen[key] = e.used
+				if last and e.used > last and not S.motions[unit] then
+					S.motions[unit] = { t = 0, remote = true }
+				end
+			end
+		end
+	end
+	S.remote = now
+end
+
+local function frame(dt)
+	local st, name = api.game.state()
+	if name ~= "game" or type(st) ~= "table" then
+		if S.mission then reset() S.mission = nil end
+		return
+	end
+	if S.mission ~= st then reset() S.mission = st end
+	refresh(st)
+	for unit, m in pairs(S.motions) do
+		local before = m.t
+		m.t = m.t + dt
+		if not g("Unit").alive(unit) then
+			S.motions[unit], S.pending[unit] = nil, nil
+		elseif S.pending[unit] then
+			local sname, downed = state_of(unit)
+			if not M.can_keep(sname, downed) then
+				anim.cancel(m)
+				S.pending[unit] = nil
+			elseif before < anim.STAB and m.t >= anim.STAB then
+				S.pending[unit] = nil
+				local _, o = record_of(unit)
+				if o then stab(st, unit, o) end
+			end
+		elseif m.remote and not m.cut and before < anim.STAB and m.t >= anim.STAB and heard_from(unit) then
+			play(volume * M.FAR)
+		end
+		if S.motions[unit] and not anim.sample(m) then S.motions[unit] = nil end
+	end
+	boost(dt)
+	listen(st)
+	share(st)
+end
+
+-- The stims of the player whose inventory state this is, for the card; nil when unknown.
+function M.count_of(inventory)
+	if type(inventory) ~= "table" then return nil end
+	local masters, slaves = api.game.masters("inventory"), api.game.slaves("inventory")
+	local function is(unit)
+		local m, s = masters[unit], slaves[unit]
+		return (m and m.state == inventory) or (s and s.state == inventory)
+	end
+	for _, o in pairs(S.own) do
+		if is(o.unit) then return o.stock.count end
+	end
+	for unit, count in pairs(S.remote) do
+		if is(unit) then return count end
+	end
+	-- A card seen before its player's numbers arrive shows a full START.
+	return stock.START
+end
+
+-- An ammo box: REFILL more for the Helldiver it went to, when this machine plays it.
+local function on_ammo(unit)
+	local _, o = record_of(unit)
+	if o and stock.add(o.stock) > 0 then
+		local st = api.game.state()
+		if type(st) == "table" then share(st) end
+	end
+end
+
+-- Whether an ammo box may be picked up for stims alone, with every weapon full.
+local function wants_stims(unit)
+	local _, o = record_of(unit)
+	return o ~= nil and not stock.full(o.stock)
+end
+
+function M.start(env)
+	api, log = env.api, env.log
+	volume = env.volume
+	M.FAR = obsidian.module("src/sound").FAR_GAIN
+	if env.sounds then
+		local made, why = obsidian.module("src/sound").new(env.sounds)
+		if made then player = made else log("no stim sound: " .. tostring(why)) end
+	end
+	anim.start(api, S.motions, log)
+	obsidian.on_frame(function()
+		local ok, err = pcall(frame, rawget(_G, "ENGINE_DT") or 0.016)
+		if not ok then log("stims frame: " .. tostring(err)) end
+	end)
+	obsidian.keybind("stim", function()
+		local ok, err = pcall(M.press)
+		if not ok then log("stim key: " .. tostring(err)) end
+	end)
+	obsidian.hook("InventoryComponent", "rpc_give_ammunition", function(original, self, sender, unit, ...)
+		local out = { original(self, sender, unit, ...) }
+		pcall(on_ammo, unit)
+		return unpack(out)
+	end)
+	obsidian.hook("AmmoPickupComponent", "setup_slave", function(original, self, unit, ctx, ...)
+		local out = { original(self, unit, ctx, ...) }
+		local st = type(ctx) == "table" and ctx.state
+		local can = st and st.can_interact
+		if type(can) == "function" then
+			st.can_interact = function(who, ...)
+				if can(who, ...) then return true end
+				local ok, yes = pcall(wants_stims, who)
+				return ok and yes or false
+			end
+		end
+		return unpack(out)
+	end)
+	obsidian.on_session(function(on) if not on then reset() end end)
+end
+
+M.S = S
+return M
