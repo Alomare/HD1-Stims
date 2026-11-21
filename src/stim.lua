@@ -5,8 +5,8 @@
 -- prone (crawling, or down after a dive), or is downed when the option allow_downed_stim is on, and has
 -- a stim. The sound starts with the motion, so its stab lands on the stab (SOUND_LEAD). At anim.STAB the
 -- stim is spent and the boost starts: BOOST seconds of infinite stamina and HEAL hitpoints a second, up
--- to the maximum; a downed Helldiver is brought to GET_UP hitpoints first, which stands them up. A dive,
--- a knockdown, being downed, a reload, a throw, a melee or anything else outside the states in KEEP before
+-- to the maximum; a downed Helldiver is brought to GET_UP hitpoints first, which stands them up.
+-- A knockdown, being downed, a reload, a throw, a melee or anything else outside the states in KEEP before
 -- the stab cuts the motion and the sound short and keeps the stim. With none left, the key shows "Out of
 -- stims!" over the Helldiver (api.ui.speech, Obsidian API 1.57.0).
 --
@@ -29,7 +29,7 @@ local function g(name) return rawget(_G, name) end
 
 M.BOOST = 4
 M.HEAL = 60
-M.REFRESH = 3      -- seconds after a stim takes effect before another can start
+M.REFRESH = 4      -- seconds after a stim takes effect before another can start: the whole boost
 -- While the motion plays the Helldiver moves as when aiming: the aim speed over the jog speed of the
 -- Helldiver's character_info (1.5 / 4), through the mover's velocity_scale (as Obsidian API's speed).
 M.SLOW = 0.375
@@ -82,8 +82,13 @@ function M.can_keep(state_name, downed)
 	return M.KEEP[state_name] == true
 end
 
--- Whether the motion still slows the Helldiver.
-function M.slows(m)
+-- Whether the motion still slows the Helldiver. Only on foot: a dive (CharacterStateDodge) keeps all of
+-- its reach, and crawling and the downed states are slower than aiming already.
+M.SLOWED_STATES = { CharacterStateIdle = true, CharacterStateWalk = true, CharacterStateSprint = true,
+	CharacterStateAim = true, CharacterStateAimWalk = true, CharacterStateFire = true,
+	CharacterStateWalkFire = true, CharacterStateAimFire = true, CharacterStateAimWalkFire = true }
+function M.slows(m, state_name)
+	if state_name ~= nil and not M.SLOWED_STATES[state_name] then return false end
 	return not m.cut and m.t < anim.LENGTH - M.SLOW_OFF
 end
 
@@ -270,7 +275,7 @@ end
 
 local function boost(dt)
 	for unit, left in pairs(S.boosts) do
-		local _, downed, health = state_of(unit)
+		local _, _, health, dead = state_of(unit)
 		left = left - dt
 		if left <= 0 or not g("Unit").alive(unit) then
 			S.boosts[unit] = nil
@@ -287,7 +292,9 @@ local function boost(dt)
 			local settings = lsm and lsm:get_settings_by_unit(unit)
 			local info = settings and settings.character_info
 			if ch then ch.sprint_stamina = info and info.sprint_stamina or 5 end
-			if health and not downed then
+			-- Downed again while the boost lasts (as when hit while getting up), the healing goes on and
+			-- stands the Helldiver up again once hitpoints pass 0, as the downed stim does.
+			if health and not dead then
 				local step = M.heal_step(health.hitpoints_real, health.max_hitpoints, dt)
 				if step > 0 then api.game.command(unit, "health", "do_heal", step) end
 			end
@@ -364,11 +371,11 @@ local function frame(dt)
 			end
 		end
 		if S.motions[unit] and not anim.sample(m) then S.motions[unit] = nil end
-		if S.motions[unit] and not m.remote and record_of(unit) and M.slows(m) then slow(unit) end
+		if S.motions[unit] and not m.remote and record_of(unit) and M.slows(m, (state_of(unit))) then slow(unit) end
 	end
 	for unit in pairs(S.slowed) do
 		local m = S.motions[unit]
-		if not (m and M.slows(m)) then unslow(unit) end
+		if not (m and M.slows(m, (state_of(unit)))) then unslow(unit) end
 	end
 	for unit, t in pairs(S.since) do
 		t = t + dt

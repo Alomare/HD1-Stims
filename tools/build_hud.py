@@ -192,14 +192,16 @@ def material(sprites):
 
 def cut(alpha, b0, b1, n, gap):
     """The syringe in n charges, top first, and the alpha with a clear line of `gap` rows between two (taken
-    out of the barrel): 4 the tip, the barrel in two, the end; 3 the tip, the barrel, the end; 2 the tip,
+    out of the barrel): 4 the tip, the barrel in two, the end; 3 the tip, the upper barrel, the lower barrel
+    with the end; 2 the tip,
     then the barrel and the end; 1 the whole syringe."""
     h = alpha.shape[0]
     mid = (b0 + b1) // 2
+    third = (b0 + gap + h) // 2  # the middle of what lies under the tip, for two even charges there
     # Each cut: (last row of the charge above, first row of the charge below).
     cuts = {
         4: [(b0 - 1, b0 + gap), (mid - gap // 2 - 1, mid + (gap + 1) // 2), (b1 - gap, b1 + 1)],
-        3: [(b0 - 1, b0 + gap), (b1 - gap, b1 + 1)],
+        3: [(b0 - 1, b0 + gap), (third - gap // 2 - 1, third + (gap + 1) // 2)],
         2: [(b0 - 1, b0 + gap)],
         1: [],
     }[n]

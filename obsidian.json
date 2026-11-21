@@ -1,12 +1,12 @@
 {
   "obsidian": 1,
   "id": "alomare.stims",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "name": {
     "en": "Stims"
   },
   "description": {
-    "en": "Stim injectors: up to four per Helldiver, two more from each ammo box. A stim gives four seconds of fast healing and endless stamina, shown on the loadout card and seen by the whole squad."
+    "en": "Adds the stims from Helldivers 2, adapted to Helldivers 1 mechanics. Can stim while prone or downed."
   },
   "authors": [
     "Alomare"

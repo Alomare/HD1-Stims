@@ -2,6 +2,14 @@
 
 New, changed, fixed or removed features, one line each, brief and direct. The section for a release becomes the release notes.
 
+## 0.1.1
+
+- Changed: A new stim can start only once the four seconds of the last one are over.
+- Changed: The three charge syringe on the loadout card is split more evenly.
+- Changed: New mod icon.
+- Fixed: A stim taken while downed kept healing, and stood the Helldiver up again, when downed again while getting up.
+- Fixed: A stim used during a dive no longer shortens the dive.
+
 ## 0.1.0
 
 - New: Stims: up to three per Helldiver by default, a full set on each drop and respawn, two more from each ammo box.
