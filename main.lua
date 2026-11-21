@@ -2,7 +2,7 @@
 local api = obsidian.import("obsidian.api")
 local api_info = obsidian.info and obsidian.info("obsidian.api")
 
-local API = { 1, 56, 0 }
+local API = { 1, 57, 0 }
 
 local function api_ok(version)
 	local got = {}
@@ -18,7 +18,7 @@ end
 local export = {}
 
 if not api or not api_ok(api_info and api_info.version) then
-	obsidian.log("Stims needs Obsidian API 1.56.0 or later, found " .. tostring(api_info and api_info.version))
+	obsidian.log("Stims needs Obsidian API 1.57.0 or later, found " .. tostring(api_info and api_info.version))
 	return export
 end
 
@@ -31,8 +31,10 @@ stim.start({
 	volume = obsidian.module("src/sound").gain(obsidian.settings.get("volume")),
 	sounds = obsidian.module("src/sounds"),
 	keep_regen = obsidian.settings.get("preserve_passive_healing") == true,
+	allow_downed = obsidian.settings.get("allow_downed_stim") ~= false,
+	max = obsidian.settings.get("max_stims"),
 })
-hud.start(stim.count_of, obsidian.log, stim.edge_now)
+hud.start(stim.count_of, obsidian.log, stim.edge_now, obsidian.module("src/stock").MAX)
 
 -- Other mods can read the stims of a Helldiver this machine plays or shows.
 function export.count(unit)

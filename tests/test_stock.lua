@@ -4,17 +4,30 @@ local sync = obsidian.module("src/sync")
 local T = {}
 local function test(name, fn) T[#T + 1] = { name, fn } end
 
-test("a drop starts full with four, takes one at a time down to none", function()
+test("a drop starts full at the maximum, takes one at a time down to none", function()
+	stock.set_max(3)
 	local s = stock.new()
-	eq(s.count, 4)
+	eq(s.count, 3, "3 by default")
 	eq(stock.full(s), true)
-	for _ = 1, 4 do eq(stock.take(s), true) end
+	for _ = 1, 3 do eq(stock.take(s), true) end
 	eq(s.count, 0)
 	eq(stock.take(s), false, "none left")
 	eq(s.count, 0)
 end)
 
-test("an ammo box adds two, never past four", function()
+test("the maximum is 1 to 4 and the drop starts with it", function()
+	stock.set_max(4)
+	eq(stock.new().count, 4)
+	stock.set_max(9)
+	eq(stock.MAX, 4, "no more than 4")
+	stock.set_max(0)
+	eq(stock.MAX, 1, "at least 1")
+	stock.set_max(nil)
+	eq(stock.MAX, 3, "3 when unset")
+end)
+
+test("an ammo box adds two, never past the maximum", function()
+	stock.set_max(4)
 	local s = stock.new()
 	eq(stock.add(s), 0, "full")
 	s.count = 3
@@ -23,6 +36,11 @@ test("an ammo box adds two, never past four", function()
 	s.count = 1
 	eq(stock.add(s), 2)
 	eq(s.count, 3)
+	stock.set_max(1)
+	s = stock.new()
+	s.count = 0
+	eq(stock.add(s), 1, "capped at 1")
+	stock.set_max(3)
 end)
 
 test("sync text round trips and ignores other missions", function()

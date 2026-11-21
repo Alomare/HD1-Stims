@@ -1,5 +1,5 @@
--- The syringe on each player's loadout card, right of the weapon, in four charges from the top (the tip,
--- two barrel cells, the end): the first stim used greys out the tip, the last one the end. Charges still
+-- The syringe on each player's loadout card, right of the weapon, in one charge per stim the Helldiver can
+-- carry (four: the tip, two barrel cells, the end): the first stim used greys out the top charge. Charges still
 -- carried are white, as the game draws grenades.
 --
 -- A gui draws only the materials it was made with, so the mod's material (res/hud.material, in the boot
@@ -29,21 +29,27 @@ M.EDGE_COLOR = { 120, 200, 255 }
 M.EDGE_ALPHA = 215
 M.EDGE_LAYER = 1
 
--- The bands to draw for `count` stims: { v0, v1, y, h, lit } with v from the top of the texture and y, h
--- in design units from the syringe's bottom. Pure, for tests.
-function M.bands(count, height)
+-- The syringe of a maximum of `max` stims (1 to 4): its sprite and charges (src/hud_layout.lua).
+function M.syringe(max)
+	return layout[math.max(1, math.min(4, math.floor(tonumber(max) or 4)))]
+end
+
+-- The bands to draw for `count` of `max` stims: { v0, v1, y, h, lit } with v from the top of the texture
+-- and y, h in design units from the syringe's bottom. Pure, for tests.
+function M.bands(count, height, max)
 	local out = {}
 	local function band(v, lit)
 		out[#out + 1] = { v[1], v[2], (1 - v[2]) * height, (v[2] - v[1]) * height, lit }
 	end
-	local n = #layout.segments
-	for i, v in ipairs(layout.segments) do band(v, i > n - count) end
+	local segments = M.syringe(max).segments
+	local n = #segments
+	for i, v in ipairs(segments) do band(v, i > n - count) end
 	return out
 end
 
 -- count_of(inventory_state): the stims of the card's player, or nil to draw nothing. edge_of(): how strong
--- the screen edge is now, 0 to 1.
-function M.start(count_of, log, edge_of)
+-- the screen edge is now, 0 to 1. max: the most stims a Helldiver carries.
+function M.start(count_of, log, edge_of, max)
 	local ours = setmetatable({}, { __mode = "k" }) -- HdGui objects made with the material
 	local seen = { gui = nil, frame = -1 }             -- the HUD gui last seen drawing a card
 	local frames = 0
@@ -96,9 +102,10 @@ function M.start(count_of, log, edge_of)
 				local V2, V3, C = g("Vector2"), g("Vector3"), g("Color")
 				local a = 255 * math.max(0, math.min(1, tonumber(info.fade) or 1))
 				local w = M.HEIGHT * layout.aspect
-				for _, b in ipairs(M.bands(count, M.HEIGHT)) do
+				local syringe = M.syringe(max)
+				for _, b in ipairs(M.bands(count, M.HEIGHT, max)) do
 					local c = b[5] and M.LIT or M.GREY
-					gui:image(layout.sprite, V3(M.X, M.Y + b[3], M.Z), V2(w, b[4]), C(a, c, c, c), V2(0, b[1]), V2(1, b[2]))
+					gui:image(syringe.sprite, V3(M.X, M.Y + b[3], M.Z), V2(w, b[4]), C(a, c, c, c), V2(0, b[1]), V2(1, b[2]))
 				end
 			end)
 			if not ok then

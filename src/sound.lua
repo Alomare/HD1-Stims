@@ -129,6 +129,14 @@ function M.new(variants)
 		prepared = true
 		return winmm.waveOutWrite(hwo, header, size) == 0
 	end
+	-- Cuts the sound short.
+	function player.stop()
+		if prepared then
+			winmm.waveOutReset(hwo)
+			winmm.waveOutUnprepareHeader(hwo, header, size)
+			prepared = false
+		end
+	end
 	function player.close()
 		if prepared then
 			winmm.waveOutReset(hwo)

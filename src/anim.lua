@@ -179,6 +179,20 @@ local function set_local(U, Q, unit, i, q)
 	U.set_local_rotation(unit, i, to_q(Q, q))
 end
 
+-- The Helldiver's axes from the body when it lies (prone, downed): up along the spine (hips to neck),
+-- right kept from the root and squared to it, forward their cross (the chest). Standing, the root's axes
+-- stay, so the standing pose is as tuned. Prone, the raised arm then lies flat along the ground toward the
+-- head. Pure, for tests.
+M.LYING = 0.7 -- below this cosine between the spine and the root's up, the Helldiver lies
+function M.body_axes(b, hips)
+	if not hips then return b end
+	local spine = P.normalize(P.sub(b.neck, hips))
+	if P.dot(spine, b.up) >= M.LYING then return b end
+	local right = P.normalize(P.sub(b.right, P.scale(spine, P.dot(b.right, spine))))
+	b.up, b.right, b.fwd = spine, right, P.cross(spine, right)
+	return b
+end
+
 -- Poses one Helldiver: w how far into the pose, j how far into the jab.
 function M.pose(api, world, unit, w, j)
 	local U, Q, W = g("Unit"), g("Quaternion"), g("World")
@@ -194,6 +208,7 @@ function M.pose(api, world, unit, w, j)
 		rp = pi and quat(Q, U.world_rotation(unit, pi)) or P.IDENTITY,
 		right = vec(Q.right(root)), fwd = vec(Q.forward(root)), up = vec(Q.up(root)),
 	}
+	M.body_axes(b, U.has_node(unit, "hips") and vec(U.world_position(unit, U.node(unit, "hips"))) or nil)
 	local hs, he = M.hinges(b)
 	local cached = hinge_cache[unit]
 	if hs then hinge_cache[unit] = { hs, he } elseif cached then hs, he = cached[1], cached[2] else hs, he = { x = 0, y = 0, z = 1 }, { x = 0, y = 0, z = 1 } end
@@ -218,21 +233,29 @@ function M.pose(api, world, unit, w, j)
 	return true
 end
 
--- A small blood splash at the left side of the neck of `unit`, at the stab: the game's own bullet-on-flesh
--- particle (effect_settings: bullet hits on "flesh"). Particles of a package that isn't loaded stop the
--- game, and the engine has no way to ask (no Application.can_get in this build, checked 2026-11-21). The
--- game plays this one for any bullet that hits a Helldiver, whose surface is flesh, so it is loaded in
--- every mission; it is spawned in missions only.
-M.SPLASH = "effects/surface_effects/projectile_flesh"
-function M.splash(unit)
-	local U, Q, W = g("Unit"), g("Quaternion"), g("World")
+-- A small spark at the fist of `unit`, at the stab: the game's own bullet-on-armour ricochet particle
+-- (effect_settings, bullet hits on "deflected"), at SPARK_SCALE of its size when the engine takes a scale
+-- (SPARK_SCALED, seen in game). Particles of a package that isn't loaded stop the game, and this build of
+-- the engine can't be asked (no Application.can_get, checked 2026-11-21); the game plays this one for any
+-- bullet that glances off armour, a Helldiver's included, so it is loaded in every mission, and it is
+-- spawned in missions only. The fist is l_finger_middle1, posed in the last frame.
+M.SPARK = "effects/surface_effects/projectile_deflected"
+M.SPARK_SCALE = 0.5
+M.SPARK_SCALED = true
+function M.spark(unit)
+	local U, Q, W, V3 = g("Unit"), g("Quaternion"), g("World"), g("Vector3")
 	if not (U.alive(unit) and U.has_node(unit, "neck")) then return false end
 	local world = M.game_world()
 	if not world then return false end
+	local node = U.has_node(unit, "l_finger_middle1") and "l_finger_middle1" or "neck"
+	local pos = U.world_position(unit, U.node(unit, node))
 	local root = U.world_rotation(unit, 0)
-	local left = -Q.right(root)
-	local pos = U.world_position(unit, U.node(unit, "neck")) + left * 0.08 + Q.forward(root) * 0.04
-	return pcall(W.create_particles, world, M.SPLASH, pos, Q.look(left, Q.up(root)))
+	local rot = Q.look(-Q.right(root), Q.up(root))
+	if M.SPARK_SCALED then
+		local k = M.SPARK_SCALE
+		return pcall(W.create_particles, world, M.SPARK, pos, rot, V3(k, k, k))
+	end
+	return pcall(W.create_particles, world, M.SPARK, pos, rot)
 end
 
 -- The game world, where the Helldivers are.

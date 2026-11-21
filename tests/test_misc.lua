@@ -5,15 +5,51 @@ local sounds = obsidian.module("src/sounds")
 local T = {}
 local function test(name, fn) T[#T + 1] = { name, fn } end
 
-test("a stim starts on foot and holds through firing, never while downed", function()
+test("a stim starts on foot or prone and holds through firing", function()
 	eq(stim.can_start("CharacterStateIdle", false), true)
 	eq(stim.can_start("CharacterStateSprint", false), true)
-	eq(stim.can_start("CharacterStateDodge", false), false)
+	eq(stim.can_start("CharacterStateCrawl", false), true, "prone")
+	eq(stim.can_start("CharacterStateDodge", false), true, "down after a dive")
 	eq(stim.can_start("CharacterStateReload", false), false)
-	eq(stim.can_start("CharacterStateIdle", true), false, "downed")
 	eq(stim.can_keep("CharacterStateAimWalkFire", false), true)
 	eq(stim.can_keep("CharacterStateKnockedDown", false), false)
 	eq(stim.can_keep("CharacterStateMelee", false), false)
+end)
+
+test("a downed stim follows the option", function()
+	stim.allow_downed = true
+	eq(stim.can_start("CharacterStateDownedIdle", true), true)
+	eq(stim.can_keep("CharacterStateDownedAimFire", true), true)
+	eq(stim.can_start("CharacterStateDownedKnockedDown", true), false, "not while knocked about")
+	eq(stim.can_start("CharacterStateIdle", true), false, "downed states only")
+	stim.allow_downed = false
+	eq(stim.can_start("CharacterStateDownedIdle", true), false, "off")
+	eq(stim.can_keep("CharacterStateDownedIdle", true), false)
+	stim.allow_downed = true
+end)
+
+test("the slowdown ends a little before the arm is down, and at once when cut", function()
+	local anim = obsidian.module("src/anim")
+	eq(stim.slows({ t = 0.2 }), true)
+	eq(stim.slows({ t = anim.LENGTH - stim.SLOW_OFF + 0.01 }), false)
+	eq(stim.slows({ t = 0.2, cut = 0.2 }), false)
+end)
+
+test("the sound starts so its thump lands on the stab", function()
+	local anim = obsidian.module("src/anim")
+	yes(math.abs(anim.STAB - stim.SOUND_LEAD) < 0.05, "starts with the motion")
+end)
+
+test("lying, the arm takes the body's axes; standing, the root's", function()
+	local anim = obsidian.module("src/anim")
+	local up = { x = 0, y = 0, z = 1 }
+	local b = { neck = { x = 0, y = 0, z = 1.8 }, right = { x = 1, y = 0, z = 0 }, fwd = { x = 0, y = 1, z = 0 }, up = up }
+	anim.body_axes(b, { x = 0, y = 0.1, z = 1.0 })
+	eq(b.up, up, "standing keeps the root")
+	local lying = { neck = { x = 0, y = 0.7, z = 0.25 }, right = { x = 1, y = 0, z = 0 }, fwd = { x = 0, y = 1, z = 0 }, up = up }
+	anim.body_axes(lying, { x = 0, y = 0, z = 0.2 })
+	yes(lying.up.y > 0.95, "up along the spine, toward the head")
+	yes(lying.fwd.z < -0.95, "forward is the chest, into the ground")
 end)
 
 test("the boost heals 60 a second up to the maximum", function()

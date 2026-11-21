@@ -1,11 +1,14 @@
 -- The stims of every Helldiver this machine plays, the key, the boost, ammo boxes, and what the other
 -- machines are told and shown.
 --
--- A stim: the key starts the motion (src/anim.lua) when the Helldiver stands, walks, runs or aims and
--- has a stim. At anim.STAB the stim is spent, the sound plays and the boost starts: BOOST seconds of
--- infinite stamina and HEAL hitpoints a second, up to the maximum. A dive, a knockdown, being downed,
--- a reload, a throw, a melee or anything else outside the states in KEEP before the stab cuts the motion
--- short and keeps the stim.
+-- A stim: the key starts the motion (src/anim.lua) when the Helldiver stands, walks, runs, aims or lies
+-- prone (crawling, or down after a dive), or is downed when the option allow_downed_stim is on, and has
+-- a stim. The sound starts with the motion, so its stab lands on the stab (SOUND_LEAD). At anim.STAB the
+-- stim is spent and the boost starts: BOOST seconds of infinite stamina and HEAL hitpoints a second, up
+-- to the maximum; a downed Helldiver is brought to GET_UP hitpoints first, which stands them up. A dive,
+-- a knockdown, being downed, a reload, a throw, a melee or anything else outside the states in KEEP before
+-- the stab cuts the motion and the sound short and keeps the stim. With none left, the key shows "Out of
+-- stims!" over the Helldiver (api.ui.speech, Obsidian API 1.57.0).
 --
 -- Passive healing: the game heals a Helldiver 2 hitpoints a second (health_decay -2 in the Helldiver's
 -- health_info; the Adrenaline perk makes it 12), as a negative hitpoints_decay. Unless the option
@@ -30,6 +33,12 @@ M.REFRESH = 3      -- seconds after a stim takes effect before another can start
 -- While the motion plays the Helldiver moves as when aiming: the aim speed over the jog speed of the
 -- Helldiver's character_info (1.5 / 4), through the mover's velocity_scale (as Obsidian API's speed).
 M.SLOW = 0.375
+M.SLOW_OFF = 0.15  -- seconds before the end of the motion that the Helldiver moves freely again
+-- The stab of the sound (its low thump, measured in the recording) comes SOUND_LEAD seconds after it
+-- starts: the sound starts that long before anim.STAB, at once when the stab comes sooner.
+M.SOUND_LEAD = 0.52
+M.GET_UP = 10      -- hitpoints a downed stim stands the Helldiver up with
+M.EMPTY_GAP = 2    -- seconds between two "Out of stims!"
 
 -- How strong the screen edge is, `t` seconds after a stim took effect: up at once, a third weaker by the
 -- end of the boost, then gone over EDGE_FADE. 0 when no stim (nil). Pure, for tests.
@@ -49,15 +58,34 @@ function M.refreshed(since)
 	return since == nil or since >= M.REFRESH
 end
 -- States a stim can start in, and states the motion goes on through.
+-- Prone is CharacterStateCrawl, and CharacterStateDodge once the dive has landed (the game keeps it until
+-- the Helldiver moves).
 M.START = { CharacterStateIdle = true, CharacterStateWalk = true, CharacterStateSprint = true,
-	CharacterStateAim = true, CharacterStateAimWalk = true }
+	CharacterStateAim = true, CharacterStateAimWalk = true, CharacterStateCrawl = true, CharacterStateDodge = true }
 M.KEEP = { CharacterStateIdle = true, CharacterStateWalk = true, CharacterStateSprint = true,
 	CharacterStateAim = true, CharacterStateAimWalk = true, CharacterStateFire = true,
-	CharacterStateWalkFire = true, CharacterStateAimFire = true, CharacterStateAimWalkFire = true }
+	CharacterStateWalkFire = true, CharacterStateAimFire = true, CharacterStateAimWalkFire = true,
+	CharacterStateCrawl = true, CharacterStateDodge = true }
+M.DOWNED_START = { CharacterStateDownedIdle = true, CharacterStateDownedCrawl = true, CharacterStateDownedAim = true }
+M.DOWNED_KEEP = { CharacterStateDownedIdle = true, CharacterStateDownedCrawl = true, CharacterStateDownedAim = true,
+	CharacterStateDownedAimFire = true }
+
+M.allow_downed = true
 
 -- Whether a Helldiver in this character state, downed or not, can start a stim, or keep one going.
-function M.can_start(state_name, downed) return not downed and M.START[state_name] == true end
-function M.can_keep(state_name, downed) return not downed and M.KEEP[state_name] == true end
+function M.can_start(state_name, downed)
+	if downed then return M.allow_downed and M.DOWNED_START[state_name] == true end
+	return M.START[state_name] == true
+end
+function M.can_keep(state_name, downed)
+	if downed then return M.allow_downed and M.DOWNED_KEEP[state_name] == true end
+	return M.KEEP[state_name] == true
+end
+
+-- Whether the motion still slows the Helldiver.
+function M.slows(m)
+	return not m.cut and m.t < anim.LENGTH - M.SLOW_OFF
+end
 
 -- The hitpoints a frame of boost adds: HEAL a second, never past the maximum. Pure, for tests.
 function M.heal_step(hp, max, dt)
@@ -78,6 +106,7 @@ local S = {
 	remote = {},       -- unit -> stims, from other machines
 	seen = {},         -- "<peer>:<id>" -> used, the last count of stims seen
 	sent = nil,
+	empty_at = -100,   -- clock of the last "Out of stims!"
 }
 
 local api, log, player, volume, keep_regen
@@ -86,7 +115,12 @@ local function state_of(unit)
 	local ch = api.game.master(unit, "character")
 	local name = ch and ch.current_state and ch.current_state.name
 	local health = api.game.master(unit, "health")
-	return name, health and (health.is_downed or health.is_dead) or false, health
+	-- The health state of a downed Helldiver has no is_downed (checked in game, 2026-11-21): downed is the
+	-- character's Downed states, or hitpoints at or under 0.
+	local dead = (health and health.is_dead) or name == "CharacterStateDead" or false
+	local downed = dead or (type(name) == "string" and name:find("^CharacterStateDowned") ~= nil)
+		or (health and health.is_downed) or (health and type(health.hitpoints_real) == "number" and health.hitpoints_real <= 0) or false
+	return name, downed, health, dead
 end
 
 local function go_id(st, unit)
@@ -114,6 +148,10 @@ end
 
 local function play(gain)
 	if player then pcall(player.play, gain) end
+end
+
+local function stop_sound()
+	if player and player.stop then pcall(player.stop) end
 end
 
 -- Shares the counts of this machine's Helldivers when they changed.
@@ -193,11 +231,25 @@ function M.press()
 	local unit = api.game.my_unit()
 	if not unit then return end
 	local _, o = record_of(unit)
-	if not o or o.stock.count <= 0 or S.pending[unit] or not M.refreshed(S.since[unit]) then return end
-	local name, downed = state_of(unit)
-	if not M.can_start(name, downed) then return end
+	if not o or S.pending[unit] or not M.refreshed(S.since[unit]) then return end
+	local name, downed, _, dead = state_of(unit)
+	if dead or not M.can_start(name, downed) then return end
+	if o.stock.count <= 0 then
+		local now = os.clock()
+		if now - S.empty_at >= M.EMPTY_GAP and api.ui.speech then
+			S.empty_at = now
+			api.ui.speech(unit, M.text("stims_out"), 2)
+		end
+		return
+	end
 	S.motions[unit] = { t = 0 }
 	S.pending[unit] = true
+end
+
+-- Words of the mod in the game language (locales/), English when missing.
+function M.text(key)
+	local ok, t = pcall(obsidian.text, key)
+	return ok and type(t) == "string" and t ~= key and t or "Out of stims!"
 end
 
 local function stab(st, unit, o)
@@ -209,7 +261,10 @@ local function stab(st, unit, o)
 		api.game.command(unit, "character", "infinite_stamina", true)
 		S.stamina_on[unit] = true
 	end
-	play(volume)
+	local _, downed, health, dead = state_of(unit)
+	if downed and not dead and health and type(health.hitpoints_real) == "number" then
+		api.game.command(unit, "health", "do_heal", M.GET_UP - math.min(0, health.hitpoints_real))
+	end
 	share(st)
 end
 
@@ -285,28 +340,35 @@ local function frame(dt)
 		m.t = m.t + dt
 		if not g("Unit").alive(unit) then
 			S.motions[unit], S.pending[unit] = nil, nil
-		elseif S.pending[unit] then
-			local sname, downed = state_of(unit)
-			if not M.can_keep(sname, downed) then
-				anim.cancel(m)
-				S.pending[unit] = nil
-			elseif before < anim.STAB and m.t >= anim.STAB then
-				S.pending[unit] = nil
-				local _, o = record_of(unit)
-				if o then
-					stab(st, unit, o)
-					anim.splash(unit)
-				end
+		else
+			if not m.cut and not m.sounded and m.t >= anim.STAB - M.SOUND_LEAD then
+				m.sounded = true
+				if not m.remote then play(volume) elseif heard_from(unit) then play(volume * M.FAR) end
 			end
-		elseif m.remote and not m.cut and before < anim.STAB and m.t >= anim.STAB then
-			anim.splash(unit)
-			if heard_from(unit) then play(volume * M.FAR) end
+			if S.pending[unit] then
+				local sname, downed = state_of(unit)
+				if not M.can_keep(sname, downed) then
+					anim.cancel(m)
+					S.pending[unit] = nil
+					stop_sound()
+				elseif before < anim.STAB and m.t >= anim.STAB then
+					S.pending[unit] = nil
+					local _, o = record_of(unit)
+					if o then
+						stab(st, unit, o)
+						anim.spark(unit)
+					end
+				end
+			elseif m.remote and not m.cut and before < anim.STAB and m.t >= anim.STAB then
+				anim.spark(unit)
+			end
 		end
 		if S.motions[unit] and not anim.sample(m) then S.motions[unit] = nil end
-		if S.motions[unit] and not m.remote and record_of(unit) then slow(unit) end
+		if S.motions[unit] and not m.remote and record_of(unit) and M.slows(m) then slow(unit) end
 	end
 	for unit in pairs(S.slowed) do
-		if not S.motions[unit] then unslow(unit) end
+		local m = S.motions[unit]
+		if not (m and M.slows(m)) then unslow(unit) end
 	end
 	for unit, t in pairs(S.since) do
 		t = t + dt
@@ -361,6 +423,8 @@ function M.start(env)
 	api, log = env.api, env.log
 	volume = env.volume
 	keep_regen = env.keep_regen
+	if env.allow_downed ~= nil then M.allow_downed = env.allow_downed end
+	if env.max then stock.set_max(env.max) end
 	M.FAR = obsidian.module("src/sound").FAR_GAIN
 	if env.sounds then
 		local made, why = obsidian.module("src/sound").new(env.sounds)

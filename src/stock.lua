@@ -1,10 +1,16 @@
--- How many stims a Helldiver carries: START on each drop and respawn, MAX at the most, REFILL more from
--- each ammo box. Pure, for tests.
+-- How many stims a Helldiver carries: MAX at the most (the option max_stims, 1 to 4), as many on each
+-- drop and respawn (START), REFILL more from each ammo box. Pure, for tests.
 local M = {}
 
-M.START = 4
-M.MAX = 4
+M.START = 3
+M.MAX = 3
 M.REFILL = 2
+
+-- The most a Helldiver carries, and starts with: 1 to 4.
+function M.set_max(n)
+	n = math.max(1, math.min(4, math.floor(tonumber(n) or 3)))
+	M.MAX, M.START = n, n
+end
 
 function M.new()
 	return { count = M.START }

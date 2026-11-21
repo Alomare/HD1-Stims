@@ -190,56 +190,76 @@ def material(sprites):
     return struct.pack("<II", MATERIAL_VERSION, len(records)) + b"".join(r for _, r in records)
 
 
+def cut(alpha, b0, b1, n, gap):
+    """The syringe in n charges, top first, and the alpha with a clear line of `gap` rows between two (taken
+    out of the barrel): 4 the tip, the barrel in two, the end; 3 the tip, the barrel, the end; 2 the tip,
+    then the barrel and the end; 1 the whole syringe."""
+    h = alpha.shape[0]
+    mid = (b0 + b1) // 2
+    # Each cut: (last row of the charge above, first row of the charge below).
+    cuts = {
+        4: [(b0 - 1, b0 + gap), (mid - gap // 2 - 1, mid + (gap + 1) // 2), (b1 - gap, b1 + 1)],
+        3: [(b0 - 1, b0 + gap), (b1 - gap, b1 + 1)],
+        2: [(b0 - 1, b0 + gap)],
+        1: [],
+    }[n]
+    a = alpha.copy()
+    segments, top = [], 0
+    for last, first in cuts:
+        a[last + 1:first, :] = 0
+        segments.append((top, last))
+        top = first
+    segments.append((top, h - 1))
+    return a, segments
+
+
 def main():
     alpha = silhouette(Path(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else ICON)
     (b0, b1), widths = barrel_rows(alpha)
     if "--widths" in sys.argv: print(list(enumerate(widths.tolist())))
     gap = max(2, int(round(GAP * HEIGHT)))
-    h = alpha.shape[0]
-    # SEGMENTS (4) charges from the top: the tip (needle, hub and grips, above the barrel), the barrel cut
-    # in two, and the end (below the barrel). A clear line of `gap` rows parts each from the next, taken
-    # out of the barrel.
-    mid = (b0 + b1) // 2
-    segments = [(0, b0 - 1), (b0 + gap, mid - gap // 2 - 1), (mid + (gap + 1) // 2, b1 - gap), (b1 + 1, h - 1)]
-    for (t0, t1), (n0, _) in zip(segments, segments[1:]):
-        alpha[t1 + 1:n0, :] = 0
     h, w = alpha.shape
-    rgba = np.dstack([np.full((h, w, 3), 255, np.uint8), (alpha * 255 + 0.5).astype(np.uint8)])
-    image = Image.fromarray(rgba, "RGBA")
-    RES.mkdir(exist_ok=True)
-    (RES / "hud_syringe.texture").write_bytes(dds_rgba(image))
-    (RES / "hud_edge.texture").write_bytes(dds_rgba(edge()))
-    (RES / "hud.material").write_bytes(material([SPRITE, EDGE]))
-    # Bands in texture rows from the top, as shares of the height, top first: the first stim used greys
-    # out the first band.
     v = lambda row: round(row / h, 5)
+    RES.mkdir(exist_ok=True)
     lines = [
         "-- Written by tools/build_hud.py. Do not edit.",
-        "-- The syringe texture's charges as bands of v (shares of its height from the top), top first: the",
-        "-- tip, two barrel cells and the end. The first stim used greys out the tip.",
+        "-- The syringe for each maximum of stims (1 to 4): its sprite, and its charges as bands of v (shares",
+        "-- of its height from the top), top first. The first stim used greys out the top charge.",
         "return {",
-        f"	sprite = \"{SPRITE}\",",
         f"	aspect = {round(w / h, 5)}, -- width over height",
-        "	segments = {",
     ]
-    for t0, t1 in segments:
-        lines.append(f"		{{ {v(t0)}, {v(t1 + 1)} }},")
-    lines += ["	},", "}", ""]
+    sprites, previews = [], []
+    for n in range(1, SEGMENTS + 1):
+        a, segments = cut(alpha, b0, b1, n, gap)
+        rgba = np.dstack([np.full((h, w, 3), 255, np.uint8), (a * 255 + 0.5).astype(np.uint8)])
+        image = Image.fromarray(rgba, "RGBA")
+        sprite = f"{SPRITE}{n}"
+        sprites.append(sprite)
+        (RES / f"hud_syringe{n}.texture").write_bytes(dds_rgba(image))
+        lines.append(f"	[{n}] = {{ sprite = \"{sprite}\", segments = {{")
+        for t0, t1 in segments:
+            lines.append(f"		{{ {v(t0)}, {v(t1 + 1)} }},")
+        lines.append("	} },")
+        one = np.asarray(image).copy()
+        t0, t1 = segments[0]
+        if n > 1:
+            one[t0:t1 + 1, :, :3] = 128  # one stim used
+        previews.append(Image.fromarray(one, "RGBA"))
+        print(n, "segments", segments)
+    lines += ["}", ""]
     (ROOT / "src" / "hud_layout.lua").write_text("\n".join(lines), encoding="utf-8", newline="\n")
-    cells = segments
-    # A look over the card's brown, at three sizes, full and with two stims.
-    preview = Image.new("RGBA", (w * 4 + 80, h + 20), (92, 70, 48, 255))
-    preview.alpha_composite(image, (10, 10))
-    two = np.asarray(image).copy()
-    for t0, t1 in cells[:2]:  # two stims used: the tip and the first barrel cell grey
-        two[t0:t1 + 1, :, :3] = 128
-    preview.alpha_composite(Image.fromarray(two, "RGBA"), (w + 30, 10))
-    small = image.resize((max(1, w * 40 // h), 40), Image.Resampling.LANCZOS)
-    preview.alpha_composite(small, (2 * w + 60, 10))
+    (RES / "hud_edge.texture").write_bytes(dds_rgba(edge()))
+    (RES / "hud.material").write_bytes(material(sprites + [EDGE]))
+    old = RES / "hud_syringe.texture"
+    if old.exists():
+        old.unlink()
+    # A look over the card's brown: each maximum with one stim used.
+    preview = Image.new("RGBA", ((w + 20) * len(previews) + 10, h + 20), (92, 70, 48, 255))
+    for i, im in enumerate(previews):
+        preview.alpha_composite(im, (10 + i * (w + 20), 10))
     (ROOT / "internal").mkdir(exist_ok=True)
     preview.save(ROOT / "internal" / "hud_preview.png")
-    print("size", w, h, "barrel rows", b0, b1, "segments", segments)
-    print(SPRITE, f"{BASE}/{SPRITE}", hex(murmur64(f'{BASE}/{SPRITE}'.encode())))
+    print("size", w, h, "barrel rows", b0, b1)
 
 
 if __name__ == "__main__":
