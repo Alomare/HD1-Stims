@@ -1,7 +1,7 @@
 {
   "obsidian": 1,
   "id": "alomare.stims",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "name": {
     "en": "Stims"
   },
@@ -72,7 +72,7 @@
     {
       "id": "max_stims",
       "type": "number",
-      "default": 3,
+      "default": 2,
       "min": 1,
       "max": 4,
       "step": 1,
@@ -91,7 +91,18 @@
         "en": "Preserve passive healing"
       },
       "description": {
-        "en": "Keeps the slow health regeneration of the game. Off by default, so health comes back only through stims and other healing."
+        "en": "Keeps the slow health regeneration of the game. Off by default, so health comes back only through stims and other healing. The extra regeneration of the Autoinjector perk stays either way."
+      }
+    },
+    {
+      "id": "status_immunity",
+      "type": "toggle",
+      "default": true,
+      "label": {
+        "en": "Status effect immunity"
+      },
+      "description": {
+        "en": "While a stim lasts, the Helldiver takes no status effects such as fire, poison, stun, slow or confusion, and the stim clears the ones already on. Slows from water, snow and carried objectives stay."
       }
     },
     {

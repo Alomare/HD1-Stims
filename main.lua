@@ -32,6 +32,7 @@ stim.start({
 	sounds = obsidian.module("src/sounds"),
 	keep_regen = obsidian.settings.get("preserve_passive_healing") == true,
 	allow_downed = obsidian.settings.get("allow_downed_stim") ~= false,
+	status_immunity = obsidian.settings.get("status_immunity") ~= false,
 	max = obsidian.settings.get("max_stims"),
 })
 hud.start(stim.count_of, obsidian.log, stim.edge_now, obsidian.module("src/stock").MAX)

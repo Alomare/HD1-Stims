@@ -11,10 +11,14 @@
 -- stims!" over the Helldiver (api.ui.speech, Obsidian API 1.57.0).
 --
 -- Passive healing: the game heals a Helldiver 2 hitpoints a second (health_decay -2 in the Helldiver's
--- health_info; the Adrenaline perk makes it 12), as a negative hitpoints_decay. Unless the option
--- preserve_passive_healing is on, a negative decay of an own Helldiver is set to 0 (set_health_decay 0),
--- every frame, as respawns and perks set it again. A positive decay (damage over time) is left alone, and
--- so is Obsidian API's regen effect. set_health_decay with no value gives the game's own back.
+-- health_info; the Autoinjector perk, perk_adrenaline, makes it 12), as a negative hitpoints_decay. Unless
+-- the option preserve_passive_healing is on, the base 2 is taken off the decay of an own Helldiver, so
+-- only what the perk adds stays (M.regen_without_base), every frame, as respawns and perks set it again.
+-- A positive decay (damage over time) is left alone, and so is Obsidian API's regen effect.
+-- set_health_decay with no value gives the game's back.
+--
+-- Status effects: with the option status_immunity on, a Helldiver holding a boost takes no new status
+-- effect but the environment slows, and the stab clears the ones on (M.blocks_status).
 --
 -- Health and stamina belong to the machine that plays the body, so each machine boosts only its own
 -- Helldivers. The others learn the count and each stim through lobby data (src/sync.lua) and play the
@@ -257,6 +261,27 @@ function M.text(key)
 	return ok and type(t) == "string" and t ~= key and t or "Out of stims!"
 end
 
+-- Status effects stopped while a stim lasts (option status_immunity): every element but "environment",
+-- whose slows (deep water, snow, a carried objective) stay on the whole time the Helldiver is in them and
+-- would be missing after the stim. StatusComponent.add_status_effect runs on the machine that plays the
+-- Helldiver, the same machine that holds the boost.
+M.status_immunity = true
+M.IMMUNE_ELEMENTS = { "fire", "poison", "lightning", "psychic", "generic_stun", "knockdown", "physical" }
+function M.blocks_status(template, boosted)
+	if not (M.status_immunity and boosted) then return false end
+	local T = g("StatusTemplateSettings")
+	local t = type(T) == "table" and T[template]
+	return type(t) == "table" and t.element ~= "environment"
+end
+
+-- Clears the status effects a stim makes the Helldiver immune to, at the stab.
+local function clear_statuses(unit)
+	if not M.status_immunity or not api.game.master(unit, "status") then return end
+	for _, element in ipairs(M.IMMUNE_ELEMENTS) do
+		pcall(api.game.command, unit, "status", "remove_statuses_by_element", element)
+	end
+end
+
 local function stab(st, unit, o)
 	if not stock.take(o.stock) then return end
 	o.used = o.used + 1
@@ -270,6 +295,7 @@ local function stab(st, unit, o)
 	if downed and not dead and health and type(health.hitpoints_real) == "number" then
 		api.game.command(unit, "health", "do_heal", M.GET_UP - math.min(0, health.hitpoints_real))
 	end
+	clear_statuses(unit)
 	share(st)
 end
 
@@ -302,14 +328,26 @@ local function boost(dt)
 	end
 end
 
+-- The decay to set for a Helldiver whose decay is `decay` and whose health_info gives `base`: the base
+-- passive healing taken off, what a perk adds on top kept (the Autoinjector perk, perk_adrenaline, sets -12
+-- over the base -2, so -10 stays). nil when nothing needs setting: no healing, or `decay` is `set`, the
+-- value set last. Pure, for tests.
+function M.regen_without_base(decay, base, set)
+	if type(decay) ~= "number" or decay >= 0 or decay == set then return nil end
+	base = (type(base) == "number" and base < 0) and base or 0
+	return math.min(0, decay - base)
+end
+
 -- Passive healing off for the own Helldivers (see the top).
 local function no_regen()
 	if api.effects.is_on("regen") then return end
 	for _, o in pairs(S.own) do
 		local health = api.game.master(o.unit, "health")
-		if health and type(health.hitpoints_decay) == "number" and health.hitpoints_decay < 0 then
-			api.game.command(o.unit, "health", "set_health_decay", 0)
-			S.no_regen[o.unit] = true
+		local info = health and health.health_info
+		local want = health and M.regen_without_base(health.hitpoints_decay, info and info.health_decay, S.no_regen[o.unit])
+		if want then
+			api.game.command(o.unit, "health", "set_health_decay", want)
+			S.no_regen[o.unit] = want
 		end
 	end
 end
@@ -361,13 +399,8 @@ local function frame(dt)
 				elseif before < anim.STAB and m.t >= anim.STAB then
 					S.pending[unit] = nil
 					local _, o = record_of(unit)
-					if o then
-						stab(st, unit, o)
-						anim.spark(unit)
-					end
+					if o then stab(st, unit, o) end
 				end
-			elseif m.remote and not m.cut and before < anim.STAB and m.t >= anim.STAB then
-				anim.spark(unit)
 			end
 		end
 		if S.motions[unit] and not anim.sample(m) then S.motions[unit] = nil end
@@ -431,6 +464,7 @@ function M.start(env)
 	volume = env.volume
 	keep_regen = env.keep_regen
 	if env.allow_downed ~= nil then M.allow_downed = env.allow_downed end
+	if env.status_immunity ~= nil then M.status_immunity = env.status_immunity end
 	if env.max then stock.set_max(env.max) end
 	M.FAR = obsidian.module("src/sound").FAR_GAIN
 	if env.sounds then
@@ -469,6 +503,11 @@ function M.start(env)
 			end
 		end
 		return unpack(out)
+	end)
+	obsidian.hook("StatusComponent", "add_status_effect", function(original, self, unit, ctx, template, ...)
+		local ok, blocked = pcall(M.blocks_status, template, S.boosts[unit] ~= nil)
+		if ok and blocked then return end
+		return original(self, unit, ctx, template, ...)
 	end)
 	obsidian.on_session(function(on) if not on then reset() end end)
 end

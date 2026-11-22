@@ -62,6 +62,33 @@ test("the boost heals 60 a second up to the maximum", function()
 	eq(stim.heal_step(nil, 100, 0.1), 0)
 end)
 
+test("passive healing loses the base 2 and keeps what the Autoinjector perk adds", function()
+	eq(stim.regen_without_base(-2, -2, nil), 0, "no perk: none")
+	eq(stim.regen_without_base(-12, -2, nil), -10, "perk: 10 a second stays")
+	eq(stim.regen_without_base(-10, -2, -10), nil, "set already, not taken off twice")
+	eq(stim.regen_without_base(-12, -2, -10), -10, "perk set again after a respawn")
+	eq(stim.regen_without_base(0, -2, nil), nil, "nothing to take")
+	eq(stim.regen_without_base(5, -2, nil), nil, "damage over time left alone")
+	eq(stim.regen_without_base(-2, nil, nil), -2, "no base known: left as it is")
+	eq(stim.regen_without_base(-1, -2, nil), 0, "never turned into damage")
+end)
+
+test("status immunity: everything but environment slows, while a stim lasts, when on", function()
+	StatusTemplateSettings = { regular_burn = { element = "fire" }, flashbang_stun = { element = "generic_stun" },
+		difficult_water = { element = "environment" }, confuse = { element = "psychic" } }
+	stim.status_immunity = true
+	eq(stim.blocks_status("regular_burn", true), true)
+	eq(stim.blocks_status("flashbang_stun", true), true)
+	eq(stim.blocks_status("confuse", true), true)
+	eq(stim.blocks_status("difficult_water", true), false, "water keeps slowing")
+	eq(stim.blocks_status("regular_burn", false), false, "no stim on")
+	eq(stim.blocks_status("unknown", true), false)
+	stim.status_immunity = false
+	eq(stim.blocks_status("regular_burn", true), false, "option off")
+	stim.status_immunity = true
+	StatusTemplateSettings = nil
+end)
+
 test("another stim can start only once the 4 seconds of the last are over", function()
 	eq(stim.refreshed(nil), true, "none yet")
 	eq(stim.refreshed(0), false)

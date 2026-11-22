@@ -1,12 +1,14 @@
 # Stims
 
-Stim injectors for HELLDIVERS. Each Helldiver carries up to three stims by default (one to four with the Maximum stim count option) and starts every drop and respawn with a full set. An ammo box gives two more, and can be picked up for stims alone when every weapon is full.
+Stim injectors for HELLDIVERS. Each Helldiver carries up to two stims by default (one to four with the Maximum stim count option) and starts every drop and respawn with a full set. An ammo box gives two more, and can be picked up for stims alone when every weapon is full.
 
 A stim takes the key (V by default): the Helldiver raises the left fist and stabs the injector into the neck, standing, moving or prone. Unless a knockdown, a reload, a throw or a melee cuts the motion short, the stim gives four seconds of endless stamina and 60 health a second, up to full health. The Helldiver moves at aiming speed while the injection plays, the screen edges glow light blue while the stim lasts, and another stim can start once the four seconds of the last one are over. With none left, "Out of stims!" shows over the Helldiver.
 
+While a stim lasts, the Helldiver takes no status effects such as fire, poison, stun, slow or confusion, and the stim clears the ones already on. Slows from water, snow and carried objectives stay. The Status effect immunity option turns this off.
+
 A downed Helldiver can use a stim to get back up and heal, unless the Allow downed stim option is off.
 
-Passive health regeneration is off: health comes back through stims and other healing. The Preserve passive healing option keeps it.
+Passive health regeneration is off: health comes back through stims and other healing. The Preserve passive healing option keeps it. With the Autoinjector perk, the extra regeneration of the perk stays either way.
 
 The loadout card shows a syringe right of the weapon, one charge per stim, spent from the needle down. Other players see the motion and the count of each Helldiver.
 
@@ -19,8 +21,9 @@ The loadout card shows a syringe right of the weapon, one charge per stim, spent
 
 | Option | Default | What it does |
 |---|---|---|
-| Maximum stim count | 3 | Stims each Helldiver carries, and starts each drop and respawn with (1 to 4). |
-| Preserve passive healing | Off | Keeps the slow health regeneration of the game. |
+| Maximum stim count | 2 | Stims each Helldiver carries, and starts each drop and respawn with (1 to 4). |
+| Preserve passive healing | Off | Keeps the slow health regeneration of the game. The Autoinjector perk bonus stays either way. |
+| Status effect immunity | On | No status effects while a stim lasts, apart from water, snow and carry slows. |
 | Allow downed stim | On | A downed Helldiver can use a stim to get back up and heal. |
 | Stim sound volume | 0.7 | How loud the stim sound plays. Other players' stims nearby play quieter. |
 | Use a stim (key) | V | The key that uses a stim. |

@@ -23,7 +23,7 @@ test("the maximum is 1 to 4 and the drop starts with it", function()
 	stock.set_max(0)
 	eq(stock.MAX, 1, "at least 1")
 	stock.set_max(nil)
-	eq(stock.MAX, 3, "3 when unset")
+	eq(stock.MAX, 2, "2 when unset")
 end)
 
 test("an ammo box adds two, never past the maximum", function()

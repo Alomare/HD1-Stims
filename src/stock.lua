@@ -2,13 +2,13 @@
 -- drop and respawn (START), REFILL more from each ammo box. Pure, for tests.
 local M = {}
 
-M.START = 3
-M.MAX = 3
+M.START = 2
+M.MAX = 2
 M.REFILL = 2
 
 -- The most a Helldiver carries, and starts with: 1 to 4.
 function M.set_max(n)
-	n = math.max(1, math.min(4, math.floor(tonumber(n) or 3)))
+	n = math.max(1, math.min(4, math.floor(tonumber(n) or 2)))
 	M.MAX, M.START = n, n
 end
 

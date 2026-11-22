@@ -233,31 +233,6 @@ function M.pose(api, world, unit, w, j)
 	return true
 end
 
--- A small spark at the fist of `unit`, at the stab: the game's own bullet-on-armour ricochet particle
--- (effect_settings, bullet hits on "deflected"), at SPARK_SCALE of its size when the engine takes a scale
--- (SPARK_SCALED, seen in game). Particles of a package that isn't loaded stop the game, and this build of
--- the engine can't be asked (no Application.can_get, checked 2026-11-21); the game plays this one for any
--- bullet that glances off armour, a Helldiver's included, so it is loaded in every mission, and it is
--- spawned in missions only. The fist is l_finger_middle1, posed in the last frame.
-M.SPARK = "effects/surface_effects/projectile_deflected"
-M.SPARK_SCALE = 0.5
-M.SPARK_SCALED = true
-function M.spark(unit)
-	local U, Q, W, V3 = g("Unit"), g("Quaternion"), g("World"), g("Vector3")
-	if not (U.alive(unit) and U.has_node(unit, "neck")) then return false end
-	local world = M.game_world()
-	if not world then return false end
-	local node = U.has_node(unit, "l_finger_middle1") and "l_finger_middle1" or "neck"
-	local pos = U.world_position(unit, U.node(unit, node))
-	local root = U.world_rotation(unit, 0)
-	local rot = Q.look(-Q.right(root), Q.up(root))
-	if M.SPARK_SCALED then
-		local k = M.SPARK_SCALE
-		return pcall(W.create_particles, world, M.SPARK, pos, rot, V3(k, k, k))
-	end
-	return pcall(W.create_particles, world, M.SPARK, pos, rot)
-end
-
 -- The game world, where the Helldivers are.
 function M.game_world()
 	local wm = g("WorldManager")

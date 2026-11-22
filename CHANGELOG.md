@@ -2,6 +2,14 @@
 
 New, changed, fixed or removed features, one line each, brief and direct. The section for a release becomes the release notes.
 
+## 1.0.0
+
+- New: Status effect immunity option, on by default: while a stim lasts, the Helldiver takes no fire, poison, stun, slow or confusion, and the stim clears the ones already on. Slows from water, snow and carried objectives stay.
+- Changed: Each Helldiver carries two stims by default.
+- Changed: With Preserve passive healing off, the Autoinjector perk still gives the extra health regeneration. Only the base regeneration is removed.
+- Changed: New mod icon and thumbnail.
+- Removed: The spark at the stab.
+
 ## 0.1.1
 
 - Changed: A new stim can start only once the four seconds of the last one are over.
