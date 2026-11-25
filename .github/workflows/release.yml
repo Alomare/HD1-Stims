@@ -16,3 +16,13 @@ permissions:
 jobs:
   release:
     uses: Alomare/HD1-LuaModdingSkill/.github/workflows/mod-release.yml@main
+
+  # A release made with the workflow's own token starts no other workflow, so the upload is called from here.
+  nexus:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    uses: ./.github/workflows/nexus.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      NEXUS_API_KEY: ${{ secrets.NEXUS_API_KEY }}
